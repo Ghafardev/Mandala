@@ -5,10 +5,23 @@ from typing import Dict, Any, Optional
 
 import torch
 
-if torch.cuda.is_available():
-    device ="cuda"
-else:
-    device = "cpu"
+
+def detect_compute_backend_local() -> str:
+    """Detect compute backend locally: 'rocm', 'cuda', or 'cpu'."""
+    try:
+        if torch.cuda.is_available():
+            try:
+                device_name = torch.cuda.get_device_name(0).lower()
+            except Exception:
+                device_name = ""
+
+            if "amd" in device_name or "radeon" in device_name:
+                return "rocm"
+            return "cuda"
+    except Exception:
+        pass
+
+    return "cpu"
 
 def compile_and_execute_kernel(payload: Dict[str, Any]) -> Dict[str, Any]:
     start_time = time.perf_counter()
@@ -23,7 +36,20 @@ def compile_and_execute_kernel(payload: Dict[str, Any]) -> Dict[str, Any]:
     num_warps = int(payload.get("num_warps", 4))
     num_stages = int(payload.get("num_stages", 2))
     dtype = payload.get("dtype", "bfloat16")
-    target_arch = payload.get("target_arch", "gfx942")
+    requested_arch = payload.get("target_arch", "auto")
+
+    # Resolve target architecture when caller requests "auto"
+    if requested_arch == "auto":
+        backend = detect_compute_backend_local()
+        if backend == "rocm":
+            target_arch = "gfx942"
+        elif backend == "cuda":
+            # Default NVIDIA target for T4 (Turing) is sm75
+            target_arch = "sm75"
+        else:
+            target_arch = "cpu"
+    else:
+        target_arch = requested_arch
     waves_per_eu = int(payload.get("waves_per_eu", 2))
 
     grid_x = math.ceil(M / block_m)
@@ -62,10 +88,20 @@ def compile_and_execute_kernel(payload: Dict[str, Any]) -> Dict[str, Any]:
         total_bytes = 3 * M * N * elem_bytes
         kernel_name = f"triton_vector_add_amd_{block_m}"
 
-    # Execution performance model based on AMD CDNA3 architecture
-    # Peak MI300X: 1300 TFLOPS BF16, 5.3 TB/s HBM3
-    theoretical_peak_tflops = 1300.0 if target_arch == "gfx942" else (383.0 if target_arch == "gfx90a" else 123.0)
-    theoretical_peak_bw = 5300.0 if target_arch == "gfx942" else (3200.0 if target_arch == "gfx90a" else 960.0)
+    # Execution performance model (simple heuristic per-arch)
+    if target_arch == "gfx942":
+        theoretical_peak_tflops = 1300.0
+        theoretical_peak_bw = 5300.0
+    elif target_arch == "gfx90a":
+        theoretical_peak_tflops = 383.0
+        theoretical_peak_bw = 3200.0
+    elif target_arch.startswith("sm"):
+        # NVIDIA CUDA heuristic: sm75 ~ T4 (Turing)
+        theoretical_peak_tflops = 65.0 if target_arch == "sm75" else 250.0
+        theoretical_peak_bw = 320.0 if target_arch == "sm75" else 900.0
+    else:
+        theoretical_peak_tflops = 123.0
+        theoretical_peak_bw = 960.0
 
     # Efficiency factor governed by block tuning and warp choices
     efficiency = 0.84

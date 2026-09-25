@@ -1,4 +1,14 @@
-export const DEFAULT_BACKEND_URL = 'http://localhost:8000';
+export const DEFAULT_BACKEND_URL = 'https://stuffed-audience-agenda.ngrok-free.dev';
+
+function backendToWs(base: string) {
+  try {
+    const url = new URL(base);
+    const proto = url.protocol === 'https:' ? 'wss:' : 'ws:';
+    return `${proto}//${url.host}/ws/gpu-telemetry`;
+  } catch {
+    return 'ws://localhost:8000/ws/gpu-telemetry';
+  }
+}
 
 export async function fetchWithBackendFallback(
   endpoint: string,
@@ -36,13 +46,13 @@ export function createTelemetryWebSocket(
 
   const tryConnect = () => {
     if (isCleanedUp) return;
-    onStatusChange('connecting', 'ws://localhost:8000/ws/gpu-telemetry');
+    onStatusChange('connecting', backendToWs(DEFAULT_BACKEND_URL));
 
     let localWs: WebSocket | null = null;
     let fallbackScheduled = false;
 
     try {
-      localWs = new WebSocket('ws://localhost:8000/ws/gpu-telemetry');
+      localWs = new WebSocket(backendToWs(DEFAULT_BACKEND_URL));
     } catch {
       // direct instantiation may fail if protocol is blocked
     }
@@ -62,8 +72,7 @@ export function createTelemetryWebSocket(
         // ignore cleanup errors
       }
 
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const fallbackUrl = `${protocol}//${window.location.host}/ws/gpu-telemetry`;
+      const fallbackUrl = backendToWs(DEFAULT_BACKEND_URL);
 
       onStatusChange('connecting', fallbackUrl);
 
