@@ -1,0 +1,9 @@
+fastapi>=0.110.0
+uvicorn[standard]>=0.28.0
+websockets>=12.0
+pydantic>=2.6.0
+pydantic-ai>=0.0.1
+openai>=1.14.0
+# Note: For AMD ROCm environment, install PyTorch with ROCm 6.x:
+# pip install torch --index-url https://download.pytorch.org/whl/rocm6.1
+# pip install triton

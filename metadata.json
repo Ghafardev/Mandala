@@ -1,0 +1,6 @@
+{
+  "name": "Mandala - AMD ROCm & Triton LLM Studio",
+  "description": "Low-code GUI dashboard to engineer, compile, and profile Triton kernels and PyTorch models on AMD ROCm GPUs with real-time telemetry and AI Copilot.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
