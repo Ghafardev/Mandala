@@ -1,1 +1,1 @@
-# Gen-Ai
+# Mandala super App
