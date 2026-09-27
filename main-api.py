@@ -242,7 +242,8 @@ async def compile_and_run(request: CompileRunRequest):
 
         request_data["compute_backend"] = detect_compute_backend()
 
-        result = compile_and_execute_kernel(request._data)
+        # pydantic v2 BaseModel internals differ; pass the dict representation
+        result = compile_and_execute_kernel(request_data)
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Kernel compilation failed: {str(e)}")
