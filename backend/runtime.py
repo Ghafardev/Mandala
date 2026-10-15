@@ -1,0 +1,198 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from enum import StrEnum
+from importlib import import_module
+from importlib.util import find_spec
+from typing import Annotated, Literal, Self
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+
+class ComputeBackend(StrEnum):
+    CPU = "cpu"
+    CUDA = "cuda"
+    ROCM = "rocm"
+
+
+class RuntimeStatus(StrEnum):
+    AVAILABLE = "available"
+    UNAVAILABLE = "unavailable"
+    FAILED = "failed"
+
+
+class KernelType(StrEnum):
+    GEMM = "gemm"
+    VECTOR_ADD = "vector_add"
+
+
+@dataclass(frozen=True, slots=True)
+class InvalidRuntimeCapabilityError(ValueError):
+    detail: str
+
+    def __str__(self) -> str:
+        return self.detail
+
+
+class RuntimeModel(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+
+class RuntimeCapability(RuntimeModel):
+    status: RuntimeStatus
+    backend: ComputeBackend
+    triton_available: bool
+    device_name: str | None = None
+    device_arch: str | None = None
+    diagnostic: str | None = None
+
+    @model_validator(mode="after")
+    def validate_state(self) -> Self:
+        match self.status:
+            case RuntimeStatus.AVAILABLE:
+                if self.backend is ComputeBackend.CPU:
+                    raise InvalidRuntimeCapabilityError(
+                        "An available runtime must have a GPU backend."
+                    )
+                if not self.triton_available:
+                    raise InvalidRuntimeCapabilityError(
+                        "An available runtime requires Triton."
+                    )
+                if self.device_name is None or self.device_arch is None:
+                    raise InvalidRuntimeCapabilityError(
+                        "An available runtime requires detected device details."
+                    )
+            case RuntimeStatus.UNAVAILABLE | RuntimeStatus.FAILED:
+                return self
+            case _ as unreachable:
+                from typing import assert_never
+
+                assert_never(unreachable)
+        return self
+
+
+class CompileRunRequest(RuntimeModel):
+    kernel_type: KernelType
+    vector_size: Annotated[int, Field(gt=0)] | None = None
+    M: Annotated[int, Field(gt=0)] | None = None
+    N: Annotated[int, Field(gt=0)] | None = None
+    K: Annotated[int, Field(gt=0)] | None = None
+
+    @model_validator(mode="after")
+    def validate_kernel_shape(self) -> Self:
+        match self.kernel_type:
+            case KernelType.VECTOR_ADD:
+                if self.vector_size is None:
+                    raise ValueError("vector_add requires vector_size.")
+                if any(value is not None for value in (self.M, self.N, self.K)):
+                    raise ValueError("vector_add does not accept matrix dimensions.")
+            case KernelType.GEMM:
+                if self.vector_size is not None:
+                    raise ValueError("gemm does not accept vector_size.")
+                if self.M is None or self.N is None or self.K is None:
+                    raise ValueError("gemm requires M, N, and K.")
+            case _ as unreachable:
+                from typing import assert_never
+
+                assert_never(unreachable)
+        return self
+
+
+class CompileCompleted(RuntimeModel):
+    status: Literal["completed"] = "completed"
+    kernel_type: KernelType
+    capability: RuntimeCapability
+    elapsed_us: Annotated[float, Field(ge=0)]
+    verified: bool
+    max_absolute_error: Annotated[float, Field(ge=0)]
+
+
+class CompileRejected(RuntimeModel):
+    status: Literal["rejected"] = "rejected"
+    reason: str
+    capability: RuntimeCapability
+
+
+class CompileFailed(RuntimeModel):
+    status: Literal["failed"] = "failed"
+    reason: str
+    capability: RuntimeCapability
+
+
+CompileResult = CompileCompleted | CompileRejected | CompileFailed
+
+
+def detect_runtime_capability() -> RuntimeCapability:
+    triton_available = find_spec("triton") is not None
+    try:
+        torch = import_module("torch")
+    except ModuleNotFoundError:
+        return RuntimeCapability(
+            status=RuntimeStatus.UNAVAILABLE,
+            backend=ComputeBackend.CPU,
+            triton_available=triton_available,
+            diagnostic="PyTorch is not installed.",
+        )
+
+    try:
+        cuda = torch.cuda
+        if not cuda.is_available():
+            return RuntimeCapability(
+                status=RuntimeStatus.UNAVAILABLE,
+                backend=ComputeBackend.CPU,
+                triton_available=triton_available,
+                diagnostic="No CUDA or ROCm GPU is available to PyTorch.",
+            )
+        device_name = str(cuda.get_device_name(0))
+        backend = (
+            ComputeBackend.ROCM
+            if torch.version.hip is not None
+            else ComputeBackend.CUDA
+        )
+        device_arch = _detect_device_arch(torch, backend)
+    except (AttributeError, RuntimeError) as error:
+        return RuntimeCapability(
+            status=RuntimeStatus.FAILED,
+            backend=ComputeBackend.CPU,
+            triton_available=triton_available,
+            diagnostic=f"GPU runtime detection failed: {error}",
+        )
+
+    if not triton_available:
+        return RuntimeCapability(
+            status=RuntimeStatus.UNAVAILABLE,
+            backend=backend,
+            triton_available=False,
+            device_name=device_name,
+            device_arch=device_arch,
+            diagnostic="Triton is not installed.",
+        )
+    return RuntimeCapability(
+        status=RuntimeStatus.AVAILABLE,
+        backend=backend,
+        triton_available=True,
+        device_name=device_name,
+        device_arch=device_arch,
+    )
+
+
+def _detect_device_arch(torch: object, backend: ComputeBackend) -> str:
+    cuda = getattr(torch, "cuda")
+    match backend:
+        case ComputeBackend.CUDA:
+            major, minor = cuda.get_device_capability(0)
+            return f"sm{major}{minor}"
+        case ComputeBackend.ROCM:
+            properties = cuda.get_device_properties(0)
+            arch = getattr(properties, "gcnArchName", "")
+            if isinstance(arch, str) and arch:
+                return arch.split(":", maxsplit=1)[0]
+            msg = "PyTorch did not report a ROCm device architecture."
+            raise RuntimeError(msg)
+        case ComputeBackend.CPU:
+            msg = "CPU has no GPU architecture."
+            raise RuntimeError(msg)
+        case _ as unreachable:
+            from typing import assert_never
+
+            assert_never(unreachable)

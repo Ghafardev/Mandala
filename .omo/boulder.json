@@ -1,0 +1,14 @@
+{
+  "schema_version": 2,
+  "active_work_id": "mandala-real-rocm-backend",
+  "works": {
+    "mandala-real-rocm-backend": {
+      "work_id": "mandala-real-rocm-backend",
+      "active_plan": ".omo/plans/mandala-real-rocm-backend.md",
+      "plan_name": "mandala-real-rocm-backend",
+      "session_ids": ["codex:01a13847-cb81-7230-af5e-bd632817b338"],
+      "status": "active",
+      "worktree_path": null
+    }
+  }
+}

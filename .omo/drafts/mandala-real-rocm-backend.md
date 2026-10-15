@@ -1,6 +1,6 @@
 ---
 slug: mandala-real-rocm-backend
-status: awaiting-approval
+status: approved-for-execution
 intent: clear
 review_required: true
 pending-action: write .omo/plans/mandala-real-rocm-backend.md
@@ -67,11 +67,11 @@ approach: Replace the simulated Python compilation path with a real, typed kerne
 
 ## Open questions
 - Owner decision required before plan creation: should arbitrary `custom_code` be rejected for this MVP (recommended), or must the first implementation include a sandboxed code-execution boundary? This changes the security architecture and real-test surface.
-- The AMD official script is still pending; once attached, its exact supported ROCm/PyTorch/Triton versions and kernel/test commands must be incorporated before execution.
+- User approval confirms the default: arbitrary `custom_code` is rejected for this MVP. The supplied official AMD notebooks require active-device detection, synchronization before timing, Torch-reference comparison, and HIPIFY output compilation/testing on the target platform.
 
 ## Approval gate
-status: awaiting-approval
+status: approved-for-execution
 approach: Implement the real Python execution/telemetry service behind a single versioned contract, keep the TypeScript server as the GUI host, add truthful CUDA/ROCm capability handling, and qualify with deterministic tests plus real Colab/AMD smoke paths. Use the forthcoming AMD script as the authoritative compatibility and kernel reference.
-next-action: After the user approves the approach and resolves the `custom_code` boundary, create `.omo/plans/mandala-real-rocm-backend.md`; do not implement product code.
+next-action: Execute `.omo/plans/mandala-real-rocm-backend.md` with Python/FastAPI as the authoritative real-runtime backend; keep frontend work contract-scoped.
 <!-- When exploration is exhausted and unknowns are answered, set status: awaiting-approval. -->
 <!-- That durable record is the loop guard: on a later turn read it and resume at the gate instead of re-running exploration. -->
