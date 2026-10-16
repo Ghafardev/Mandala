@@ -89,3 +89,38 @@ def test_compile_rejection_when_runtime_is_unavailable_serializes_typed_result()
         "reason": "GPU execution is unavailable.",
         "capability": capability.model_dump(mode="json"),
     }
+
+
+def test_runtime_capability_detects_cpu_backed_environment_without_gpu() -> None:
+    capability = RuntimeCapability(
+        status=RuntimeStatus.UNAVAILABLE,
+        backend=ComputeBackend.CPU,
+        triton_available=False,
+        diagnostic="CPU-only host does not support GPU execution.",
+    )
+
+    assert capability.backend is ComputeBackend.CPU
+    assert capability.status is RuntimeStatus.UNAVAILABLE
+    assert capability.device_name is None
+
+
+def test_compile_request_rejects_rocm_only_target_on_cuda_runtime() -> None:
+    request = CompileRunRequest(
+        kernel_type="gemm",
+        M=128,
+        N=128,
+        K=128,
+        target_arch="gfx942",
+    )
+
+    capability = RuntimeCapability(
+        status=RuntimeStatus.AVAILABLE,
+        backend=ComputeBackend.CUDA,
+        triton_available=True,
+        device_name="NVIDIA T4",
+        device_arch="sm75",
+    )
+
+    assert request.target_arch == "gfx942"
+    assert capability.backend is ComputeBackend.CUDA
+    assert capability.backend is not ComputeBackend.ROCM

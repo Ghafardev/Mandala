@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import os
+import sys
 from dataclasses import dataclass
 from enum import StrEnum
 from importlib import import_module
 from importlib.util import find_spec
+import time
 from typing import Annotated, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -24,6 +27,14 @@ class RuntimeStatus(StrEnum):
 class KernelType(StrEnum):
     GEMM = "gemm"
     VECTOR_ADD = "vector_add"
+
+
+class ExecutionEnvironment(StrEnum):
+    CPU_ONLY = "cpu_only"
+    CUDA_LOCAL = "cuda_local"
+    CUDA_COLAB = "cuda_colab"
+    ROCM_LOCAL = "rocm_local"
+    ROCM_CLOUD = "rocm_cloud"
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,6 +92,7 @@ class CompileRunRequest(RuntimeModel):
     M: Annotated[int, Field(gt=0)] | None = None
     N: Annotated[int, Field(gt=0)] | None = None
     K: Annotated[int, Field(gt=0)] | None = None
+    target_arch: str | None = None
 
     @model_validator(mode="after")
     def validate_kernel_shape(self) -> Self:
@@ -180,6 +192,34 @@ def detect_runtime_capability() -> RuntimeCapability:
     )
 
 
+def detect_execution_environment() -> ExecutionEnvironment:
+    """Classify the current execution environment for honest compatibility checks."""
+    try:
+        torch = import_module("torch")
+    except ModuleNotFoundError:
+        return ExecutionEnvironment.CPU_ONLY
+
+    try:
+        if not torch.cuda.is_available():
+            return ExecutionEnvironment.CPU_ONLY
+    except Exception:
+        return ExecutionEnvironment.CPU_ONLY
+
+    device_name = str(torch.cuda.get_device_name(0)).lower()
+    is_rocm = getattr(torch.version, "hip", None) is not None or "amd" in device_name or "radeon" in device_name or "mi" in device_name
+
+    if is_rocm:
+        env_name = os.environ.get("COLAB_RELEASE_TAG", "")
+        if "colab" in env_name.lower() or "google.colab" in sys.modules:
+            return ExecutionEnvironment.ROCM_CLOUD
+        return ExecutionEnvironment.ROCM_LOCAL
+
+    if "colab" in os.environ.get("COLAB_RELEASE_TAG", "").lower() or "google.colab" in sys.modules:
+        return ExecutionEnvironment.CUDA_COLAB
+
+    return ExecutionEnvironment.CUDA_LOCAL
+
+
 def _detect_device_arch(torch: object, backend: ComputeBackend) -> str:
     cuda = getattr(torch, "cuda")
     match backend:
@@ -202,6 +242,26 @@ def _detect_device_arch(torch: object, backend: ComputeBackend) -> str:
             assert_never(unreachable)
 
 
+def validate_target_compatibility(request: CompileRunRequest, capability: RuntimeCapability) -> None:
+    """Reject incompatible targets before any compute kernel is launched."""
+    if capability.status is not RuntimeStatus.AVAILABLE:
+        raise InvalidRuntimeCapabilityError(capability.diagnostic or "GPU execution is unavailable.")
+
+    arch = (request.target_arch or "").lower()
+    if not arch:
+        return
+
+    if capability.backend is ComputeBackend.CUDA and arch.startswith("gfx"):
+        raise InvalidRuntimeCapabilityError(
+            "CUDA runtime cannot execute an AMD gfx target; choose a CUDA-compatible target such as sm75."
+        )
+
+    if capability.backend is ComputeBackend.ROCM and arch.startswith("sm"):
+        raise InvalidRuntimeCapabilityError(
+            "ROCm runtime cannot execute a CUDA sm target; choose an AMD gfx target such as gfx942."
+        )
+
+
 def execute_compile_request(request: CompileRunRequest) -> CompileResult:
     """Execute a small, controlled GPU kernel when the runtime supports it.
 
@@ -213,6 +273,14 @@ def execute_compile_request(request: CompileRunRequest) -> CompileResult:
     if capability.status is not RuntimeStatus.AVAILABLE:
         return CompileRejected(
             reason=(capability.diagnostic or "GPU execution is unavailable."),
+            capability=capability,
+        )
+
+    try:
+        validate_target_compatibility(request, capability)
+    except InvalidRuntimeCapabilityError as error:
+        return CompileRejected(
+            reason=str(error),
             capability=capability,
         )
 
