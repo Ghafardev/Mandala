@@ -11,7 +11,7 @@ import ReactFlow, {
   BackgroundVariant,
 } from 'reactflow';
 import { TensorInputNode } from './nodes/TensorInputNode';
-import { TritonKernelNode } from './nodes/TritonKernelNode';
+import { TritonKernelNode } from './nodes/TensorKernelNode';
 import { ExecutionNode } from './nodes/ExecutionNode';
 import { OutputNode } from './nodes/OutputNode';
 

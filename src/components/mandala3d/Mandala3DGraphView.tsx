@@ -29,13 +29,14 @@ import {
     INITIAL_MANDALA_EDGES,
 } from './mandalaData';
 import { MandalaNodeInspector } from './MandalaNodeInspector';
-import { fetchWithBackendFallback } from '../../lib/api';
+import { canAttemptKernelExecution, fetchWithBackendFallback, type RuntimeCapabilityState } from '../../lib/api';
 
 export interface Mandala3DGraphViewProps {
     onLogMessage?: (msg: string) => void;
     telemetryData?: any;
     isCompiling?: boolean;
     onRunKernel?: () => void;
+    runtimeCapability?: RuntimeCapabilityState | null;
 }
 
 export const Mandala3DGraphView: React.FC<Mandala3DGraphViewProps> = ({
@@ -43,6 +44,7 @@ export const Mandala3DGraphView: React.FC<Mandala3DGraphViewProps> = ({
     telemetryData,
     isCompiling = false,
     onRunKernel,
+    runtimeCapability,
 }) => {
 const containerRef = useRef<HTMLDivElement>(null);
 
@@ -109,6 +111,14 @@ const containerRef = useRef<HTMLDivElement>(null);
       return;
     }
 
+    const targetArch = 'gfx942';
+    if (!canAttemptKernelExecution(runtimeCapability, targetArch)) {
+      if (onLogMessage) {
+        onLogMessage(`[3D-MANDALA] Execution blocked: backend ${runtimeCapability?.backend || 'unknown'} is not ready for ${targetArch}.`);
+      }
+      return;
+    }
+
     setLocalCompiling(true);
     if (onLogMessage) {
       onLogMessage(`[3D-MANDALA] Dispatching ROCm Triton Kernel on MI300X...`);
@@ -145,7 +155,7 @@ const containerRef = useRef<HTMLDivElement>(null);
     } finally {
       setLocalCompiling(false);
     }
-  }, [onRunKernel, onLogMessage]);
+  }, [onRunKernel, onLogMessage, runtimeCapability]);
 
   // Reset Geometry: re-aligns nodes & resets camera
   const handleResetGeometry = useCallback(() => {

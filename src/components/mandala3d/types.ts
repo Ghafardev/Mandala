@@ -28,6 +28,7 @@ export interface MandalaEdge3D {
   source: string;
   target: string;
   color: string;
-  type: 'radial' | 'cross' | 'link';
+  type: 'radial' | 'cross' | 'link' | 'harmony';
+  strength?: number;
 }
 

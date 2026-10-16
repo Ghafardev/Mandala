@@ -9,10 +9,17 @@ import subprocess
 from typing import Dict, Any, Optional
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from backend.telemetry import parse_rocm_smi
-from backend.runtime import CompileRunRequest, CompileRejected, execute_compile_request
+from backend.runtime import (
+    CompileRejected,
+    CompileRunRequest,
+    RuntimeStatus,
+    detect_execution_environment,
+    detect_runtime_capability,
+    execute_compile_request,
+)
 from backend.copilot_agent import create_pydantic_ai_agent, fallback_copilot_diagnosis
 
 try:
@@ -38,21 +45,6 @@ app.add_middleware(
 
 # Initialize Pydantic AI agent if available
 copilot_agent = create_pydantic_ai_agent()
-
-
-class CompileRunRequest(BaseModel):
-    kernel_type: str = Field(default="gemm", description="gemm, flash_attention, rmsnorm, softmax, vector_add, custom")
-    M: int = Field(default=2048)
-    N: int = Field(default=2048)
-    K: int = Field(default=2048)
-    block_size_m: int = Field(default=128)
-    block_size_n: int = Field(default=64)
-    block_size_k: int = Field(default=64)
-    num_warps: int = Field(default=8)
-    num_stages: int = Field(default=2)
-    dtype: str = Field(default="bfloat16")
-    target_arch: str = Field(default="gfx942", description="gfx942 (MI300X), gfx90a (MI250X), gfx1100")
-    custom_code: Optional[str] = None
 
 
 class CopilotChatRequest(BaseModel):
@@ -176,34 +168,31 @@ def get_gpu_telemetry_universal() -> Dict[str, Any]:
     }
 
 def detect_compute_backend() -> str:
+    capability = detect_runtime_capability()
+    return capability.backend.value
 
-    try:
-        import torch
-
-        if torch.cuda.is_available():
-            device_name = torch.cuda.get_device_name(0).lower()
-            if "amd" in device_name or "radeon" in device_name:
-                return "rocm"
-
-            return "cuda"
-
-    except Exception:
-        pass
-
-    return"cpu"
-            
 
 @app.get("/api/v1/health")
 async def health_check():
+    capability = detect_runtime_capability()
     telemetry = get_gpu_telemetry_universal()
+    execution_environment = (
+        capability.execution_environment.value
+        if capability.execution_environment is not None
+        else detect_execution_environment().value
+    )
 
     return {
-        "status": "online",
+        "status": "online" if capability.status is RuntimeStatus.AVAILABLE else "degraded",
+        "ready_for_execution": capability.status is RuntimeStatus.AVAILABLE,
         "service": "Mandala ROCm Engine",
-        "frameworks": ["PyTorch 2.4-rocm", "Triton 3.0", "FastAPI"],
-        "compute_backend": detect_compute_backend(),
+        "frameworks": ["PyTorch", "Triton", "FastAPI"],
+        "compute_backend": capability.backend.value,
+        "execution_environment": execution_environment,
+        "runtime_capability": capability.model_dump(mode="json"),
         "telemetry_backend": telemetry.get("backend"),
         "gpu_vendor": telemetry.get("vendor", "unknown"),
+        "diagnostic": capability.diagnostic,
     }
 
 

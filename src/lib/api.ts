@@ -15,6 +15,44 @@ function backendToWs(base: string) {
 
 export const DEFAULT_BACKEND = DEFAULT_BACKEND_URL;
 
+export interface RuntimeCapabilityState {
+  status: 'available' | 'unavailable' | 'failed';
+  backend: 'cpu' | 'cuda' | 'rocm';
+  triton_available: boolean;
+  execution_environment?: string | null;
+  device_name?: string | null;
+  device_arch?: string | null;
+  diagnostic?: string | null;
+  ready_for_execution?: boolean;
+}
+
+export async function fetchRuntimeCapability(): Promise<RuntimeCapabilityState | null> {
+  try {
+    const response = await fetchWithBackendFallback('/api/v1/health');
+    if (!response.ok) {
+      return null;
+    }
+    const payload = await response.json();
+    return payload.runtime_capability ?? payload;
+  } catch {
+    return null;
+  }
+}
+
+export function canAttemptKernelExecution(
+  capability: RuntimeCapabilityState | null | undefined,
+  targetArch?: string
+): boolean {
+  if (!capability || capability.status !== 'available') return false;
+  if (capability.backend === 'cpu' || capability.triton_available === false) return false;
+
+  const arch = (targetArch || '').toLowerCase();
+  if (capability.backend === 'cuda' && arch.startsWith('gfx')) return false;
+  if (capability.backend === 'rocm' && arch.startsWith('sm')) return false;
+
+  return true;
+}
+
 export async function fetchWithBackendFallback(
   endpoint: string,
   options: RequestInit = {}

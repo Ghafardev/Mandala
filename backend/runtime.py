@@ -57,6 +57,7 @@ class RuntimeCapability(RuntimeModel):
     status: RuntimeStatus
     backend: ComputeBackend
     triton_available: bool
+    execution_environment: ExecutionEnvironment | None = None
     device_name: str | None = None
     device_arch: str | None = None
     diagnostic: str | None = None
@@ -72,6 +73,10 @@ class RuntimeCapability(RuntimeModel):
                 if not self.triton_available:
                     raise InvalidRuntimeCapabilityError(
                         "An available runtime requires Triton."
+                    )
+                if self.execution_environment is None:
+                    raise InvalidRuntimeCapabilityError(
+                        "An available runtime requires an execution environment classification."
                     )
                 if self.device_name is None or self.device_arch is None:
                     raise InvalidRuntimeCapabilityError(
@@ -140,6 +145,7 @@ CompileResult = CompileCompleted | CompileRejected | CompileFailed
 
 def detect_runtime_capability() -> RuntimeCapability:
     triton_available = find_spec("triton") is not None
+    environment = detect_execution_environment()
     try:
         torch = import_module("torch")
     except ModuleNotFoundError:
@@ -147,6 +153,7 @@ def detect_runtime_capability() -> RuntimeCapability:
             status=RuntimeStatus.UNAVAILABLE,
             backend=ComputeBackend.CPU,
             triton_available=triton_available,
+            execution_environment=environment,
             diagnostic="PyTorch is not installed.",
         )
 
@@ -157,6 +164,7 @@ def detect_runtime_capability() -> RuntimeCapability:
                 status=RuntimeStatus.UNAVAILABLE,
                 backend=ComputeBackend.CPU,
                 triton_available=triton_available,
+                execution_environment=environment,
                 diagnostic="No CUDA or ROCm GPU is available to PyTorch.",
             )
         device_name = str(cuda.get_device_name(0))
@@ -171,6 +179,7 @@ def detect_runtime_capability() -> RuntimeCapability:
             status=RuntimeStatus.FAILED,
             backend=ComputeBackend.CPU,
             triton_available=triton_available,
+            execution_environment=environment,
             diagnostic=f"GPU runtime detection failed: {error}",
         )
 
@@ -179,6 +188,7 @@ def detect_runtime_capability() -> RuntimeCapability:
             status=RuntimeStatus.UNAVAILABLE,
             backend=backend,
             triton_available=False,
+            execution_environment=environment,
             device_name=device_name,
             device_arch=device_arch,
             diagnostic="Triton is not installed.",
@@ -187,6 +197,7 @@ def detect_runtime_capability() -> RuntimeCapability:
         status=RuntimeStatus.AVAILABLE,
         backend=backend,
         triton_available=True,
+        execution_environment=environment,
         device_name=device_name,
         device_arch=device_arch,
     )

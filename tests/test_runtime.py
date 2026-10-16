@@ -10,6 +10,7 @@ from backend.runtime import (
     CompileRejected,
     CompileRunRequest,
     ComputeBackend,
+    ExecutionEnvironment,
     RuntimeCapability,
     RuntimeStatus,
     detect_runtime_capability,
@@ -104,6 +105,21 @@ def test_runtime_capability_detects_cpu_backed_environment_without_gpu() -> None
     assert capability.device_name is None
 
 
+def test_runtime_capability_exposes_execution_environment_in_public_contract() -> None:
+    capability = RuntimeCapability(
+        status=RuntimeStatus.AVAILABLE,
+        backend=ComputeBackend.ROCM,
+        triton_available=True,
+        device_name="AMD Instinct MI300X",
+        device_arch="gfx942",
+        execution_environment=ExecutionEnvironment.ROCM_CLOUD,
+    )
+
+    payload = capability.model_dump(mode="json")
+    assert payload["execution_environment"] == "rocm_cloud"
+    assert payload["backend"] == "rocm"
+
+
 def test_compile_request_rejects_rocm_only_target_on_cuda_runtime() -> None:
     request = CompileRunRequest(
         kernel_type="gemm",
@@ -117,6 +133,7 @@ def test_compile_request_rejects_rocm_only_target_on_cuda_runtime() -> None:
         status=RuntimeStatus.AVAILABLE,
         backend=ComputeBackend.CUDA,
         triton_available=True,
+        execution_environment=ExecutionEnvironment.CUDA_LOCAL,
         device_name="NVIDIA T4",
         device_arch="sm75",
     )

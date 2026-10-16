@@ -6,6 +6,7 @@ import ReactFlow, {
   Node,
   Edge,
   Handle,
+  Position,
   useNodesState,
   useEdgesState,
   addEdge,
@@ -28,13 +29,14 @@ import {
   Clock,
   Sparkles,
 } from 'lucide-react';
-import { fetchWithBackendFallback } from '../lib/api';
+import { canAttemptKernelExecution, fetchWithBackendFallback, type RuntimeCapabilityState } from '../lib/api';
 
 export interface NodeCanvasProps {
   onLogMessage?: (log: string) => void;
   onExecutionComplete?: (result: any) => void;
   isCompiling: boolean;
   setIsCompiling: (val: boolean) => void;
+  runtimeCapability?: RuntimeCapabilityState | null;
 }
 
 // ----------------------------------------------------
@@ -131,7 +133,7 @@ const InputTensorNode = ({ data }: { data: any }) => {
       {/* Output Handle */}
       <Handle
         type="source"
-        position="right"
+        position={Position.Right}
         id="tensor-out"
         className="!w-3 !h-3 !bg-cyan-400 !border-2 !border-zinc-900"
       />
@@ -155,7 +157,7 @@ const TritonKernelNode = ({ data }: { data: any }) => {
       {/* Input Handle */}
       <Handle
         type="target"
-        position="left"
+        position={Position.Left}
         id="kernel-in"
         className="!w-3 !h-3 !bg-cyan-400 !border-2 !border-zinc-900"
       />
@@ -226,7 +228,7 @@ const TritonKernelNode = ({ data }: { data: any }) => {
       {/* Output Handle */}
       <Handle
         type="source"
-        position="right"
+        position={Position.Right}
         id="kernel-out"
         className="!w-3 !h-3 !bg-violet-400 !border-2 !border-zinc-900"
       />
@@ -245,7 +247,7 @@ const OutputEvaluationNode = ({ data }: { data: any }) => {
       {/* Input Handle */}
       <Handle
         type="target"
-        position="left"
+        position={Position.Left}
         id="eval-in"
         className="!w-3 !h-3 !bg-violet-400 !border-2 !border-zinc-900"
       />
@@ -345,6 +347,7 @@ export const NodeCanvas: React.FC<NodeCanvasProps> = ({
   onExecutionComplete,
   isCompiling,
   setIsCompiling,
+  runtimeCapability,
 }) => {
   // State for Node 1
   const [vectorSize, setVectorSize] = useState<number>(16384);
@@ -359,6 +362,14 @@ export const NodeCanvas: React.FC<NodeCanvasProps> = ({
 
   // POST request to http://localhost:8000/api/v1/triton/compile-and-run
   const handleRunKernel = useCallback(async () => {
+    const targetArch = 'gfx942';
+    if (!canAttemptKernelExecution(runtimeCapability, targetArch)) {
+      if (onLogMessage) {
+        onLogMessage(`[BLOCKED] Execution denied: backend ${runtimeCapability?.backend || 'unknown'} is not ready for ${targetArch}.`);
+      }
+      return;
+    }
+
     setIsCompiling(true);
     if (onLogMessage) {
       onLogMessage(`[DISPATCH] POST http://localhost:8000/api/v1/triton/compile-and-run`);
@@ -410,7 +421,7 @@ export const NodeCanvas: React.FC<NodeCanvasProps> = ({
     } finally {
       setIsCompiling(false);
     }
-  }, [vectorSize, blockSize, dtype, numWarps, onLogMessage, onExecutionComplete, setIsCompiling]);
+  }, [vectorSize, blockSize, dtype, numWarps, onLogMessage, onExecutionComplete, setIsCompiling, runtimeCapability]);
 
   // Define custom node types
   const nodeTypes = useMemo(

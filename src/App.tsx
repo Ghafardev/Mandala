@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 // @ts-ignore - TSX imports are valid in the app build/runtime and the project JSX config is managed outside this file.
 import { Header } from './components/Header';
 // @ts-ignore
@@ -9,6 +9,7 @@ import { TelemetryPanel } from './components/TelemetryPanel';
 import { CopilotSidebar } from './components/CopilotSidebar';
 // @ts-ignore
 import { Mandala3DGraphView } from './components/mandala3d/Mandala3DGraphView';
+import { fetchRuntimeCapability, type RuntimeCapabilityState } from './lib/api';
 
 export default function App() {
   const [activeView, setActiveView] = useState<'workflow' | '3d-mandala'>('workflow');
@@ -16,14 +17,14 @@ export default function App() {
   const [isCopilotOpen, setIsCopilotOpen] = useState(true);
   const [isTelemetryOpen, setIsTelemetryOpen] = useState(true);
   const [externalPrompt, setExternalPrompt] = useState<string | null>(null);
+  const [runtimeCapability, setRuntimeCapability] = useState<RuntimeCapabilityState | null>(null);
 
   const [logs, setLogs] = useState<string[]>([
-    `[SYS-INIT] Mandala Low-Code ROCm Studio ready.`,
-    `[DEVICE] AMD Instinct MI300X OAM detected (gfx942 - CDNA 3 architecture).`,
-    `[ROCm-DRIVER] ROCm 6.2.1 Native runtime loaded. 304 Compute Units, 19,456 Stream Processors.`,
-    `[TRITON] Triton JIT Compiler backend active. Wavefront size: 64 threads.`,
+    `[SYS-INIT] Mandala Low-Code ROCm Studio booting.`,
+    `[DEVICE] Waiting for runtime capability check from the backend API.`,
+    `[TRITON] Execution gates will remain closed until the environment is verified.`,
     `[LLM] Mandala AI Copilot loaded: Qwen 3.5 (Local).`,
-    `[3D-MANDALA] Sacred Geometry Graph Engine compiled & initialized.`,
+    `[3D-MANDALA] Sacred Geometry Graph Engine initialized.`,
   ]);
 
   const addLogMessage = useCallback((msg: string) => {
@@ -38,6 +39,23 @@ export default function App() {
   const handleClearLogs = useCallback(() => {
     setLogs([`[CLEAR] Terminal buffer reset at ${new Date().toLocaleTimeString()}`]);
   }, []);
+
+  useEffect(() => {
+    let active = true;
+    fetchRuntimeCapability().then((capability) => {
+      if (active) {
+        setRuntimeCapability(capability);
+        if (capability) {
+          addLogMessage(
+            `[RUNTIME] ${capability.backend.toUpperCase()} backend detected (${capability.execution_environment || 'unknown'}); execution ${capability.status === 'available' ? 'enabled' : 'blocked'}.`
+          );
+        }
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, [addLogMessage]);
 
   return (
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-zinc-950 font-sans text-zinc-100 select-none">
@@ -62,6 +80,7 @@ export default function App() {
                 onLogMessage={addLogMessage}
                 isCompiling={isCompiling}
                 setIsCompiling={setIsCompiling}
+                runtimeCapability={runtimeCapability}
               />
             </main>
 
@@ -79,6 +98,7 @@ export default function App() {
             <Mandala3DGraphView
               onLogMessage={addLogMessage}
               isCompiling={isCompiling}
+              runtimeCapability={runtimeCapability}
             />
           </div>
         )}
