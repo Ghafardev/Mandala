@@ -1,6 +1,6 @@
 const DEFAULT_BACKEND_URL =
   (typeof window !== 'undefined' && (window as any).__MANDALA_BACKEND_URL) ||
-  (typeof import.meta !== 'undefined' && import.meta.env?.VITE_BACKEND_URL) ||
+  (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_BACKEND_URL) ||
   'http://localhost:8000';
 
 function backendToWs(base: string) {

@@ -1,8 +1,8 @@
 {
-    "CompilerOPtions": {
-        "Target": "ES2022",
+    "compilerOptions": {
+        "target": "ES2022",
         "experimentalDecorators": true,
-        "useDefineForCLassFields": false,
+        "useDefineForClassFields": false,
         "module": "ESNext",
         "lib": [
             "ES2022",
@@ -21,6 +21,6 @@
             ]
         },
         "allowImportingTsExtensions": true,
-        "noEMit": true
+        "noEmit": true
     }
 }
