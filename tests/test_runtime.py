@@ -14,6 +14,7 @@ from backend.runtime import (
     RuntimeCapability,
     RuntimeStatus,
     detect_runtime_capability,
+    execute_compile_request,
     probe_gpu_kernel_execution,
 )
 
@@ -158,3 +159,48 @@ def test_runtime_probe_requires_real_torch_and_triton_runtime(monkeypatch: pytes
 
     assert ready is False
     assert "PyTorch" in reason or "Triton" in reason
+
+
+def test_execute_compile_request_uses_triton_vector_add_helper(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_probe() -> tuple[bool, str]:
+        return True, "ok"
+
+    def fake_torch_module() -> object:
+        return type(
+            "FakeTorch",
+            (),
+            {
+                "cuda": type(
+                    "FakeCuda",
+                    (),
+                    {
+                        "is_available": staticmethod(lambda: True),
+                        "synchronize": staticmethod(lambda device: None),
+                    },
+                )(),
+                "device": staticmethod(lambda name: name),
+                "float32": "float32",
+            },
+        )()
+
+    def fake_triton_kernel(torch_module: object, n: int, device: str) -> float:
+        return 0.0
+
+    capability = RuntimeCapability(
+        status=RuntimeStatus.AVAILABLE,
+        backend=ComputeBackend.CUDA,
+        triton_available=True,
+        execution_environment=ExecutionEnvironment.CUDA_LOCAL,
+        device_name="Fake GPU",
+        device_arch="sm80",
+    )
+
+    monkeypatch.setattr("backend.runtime.detect_runtime_capability", lambda: capability)
+    monkeypatch.setattr("backend.runtime.probe_gpu_kernel_execution", fake_probe)
+    monkeypatch.setattr("backend.runtime.import_module", lambda name: fake_torch_module() if name == "torch" else None)
+    monkeypatch.setattr("backend.runtime._execute_real_triton_vector_add", fake_triton_kernel)
+
+    result = execute_compile_request(CompileRunRequest(kernel_type="vector_add", vector_size=1024))
+
+    assert result.status == "completed"
+    assert result.max_absolute_error == 0.0

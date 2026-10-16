@@ -273,6 +273,41 @@ def validate_target_compatibility(request: CompileRunRequest, capability: Runtim
         )
 
 
+def _execute_real_triton_vector_add(torch_module: object, n: int, device: object) -> float:
+    """Run a minimal real Triton vector-add JIT kernel when the environment supports it."""
+    try:
+        triton = import_module("triton")
+    except ModuleNotFoundError as exc:
+        raise RuntimeError("Triton is not installed.") from exc
+
+    try:
+        tl = import_module("triton.language")
+    except ModuleNotFoundError as exc:
+        raise RuntimeError("Triton language bindings are not installed.") from exc
+
+    @triton.jit
+    def vector_add_kernel(x_ptr, y_ptr, output_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
+        pid = tl.program_id(axis=0)
+        offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+        mask = offsets < n_elements
+        x = tl.load(x_ptr + offsets, mask=mask, other=0.0)
+        y = tl.load(y_ptr + offsets, mask=mask, other=0.0)
+        tl.store(output_ptr + offsets, x + y, mask=mask)
+
+    x = torch_module.randn(n, device=device, dtype=torch_module.float32)
+    y = torch_module.randn(n, device=device, dtype=torch_module.float32)
+    output = torch_module.empty_like(x)
+    grid = (triton.cdiv(n, 1024),)
+    vector_add_kernel[grid](x, y, output, n, BLOCK_SIZE=1024)
+
+    if hasattr(torch_module, "cuda") and torch_module.cuda.is_available():
+        torch_module.cuda.synchronize(device)
+
+    reference = x + y
+    max_abs_error = float(torch_module.max(torch_module.abs(output - reference)).item())
+    return max_abs_error
+
+
 def probe_gpu_kernel_execution() -> tuple[bool, str]:
     """Perform a minimal real GPU probe before a kernel compilation request is accepted."""
     try:
@@ -339,14 +374,11 @@ def execute_compile_request(request: CompileRunRequest) -> CompileResult:
         device = torch.device("cuda")
         if request.kernel_type is KernelType.VECTOR_ADD:
             n = int(request.vector_size)
-            x = torch.randn(n, device=device, dtype=torch.float32)
-            y = torch.randn(n, device=device, dtype=torch.float32)
             start = time.perf_counter_ns()
-            z = x + y
+            max_abs_error = _execute_real_triton_vector_add(torch, n, device)
             if hasattr(torch, "cuda") and torch.cuda.is_available():
                 torch.cuda.synchronize(device)
             elapsed_us = (time.perf_counter_ns() - start) / 1000.0
-            max_abs_error = float(torch.max(torch.abs(z - (x + y))).item())
             return CompileCompleted(
                 kernel_type=request.kernel_type,
                 capability=capability,
