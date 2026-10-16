@@ -273,6 +273,32 @@ def validate_target_compatibility(request: CompileRunRequest, capability: Runtim
         )
 
 
+def probe_gpu_kernel_execution() -> tuple[bool, str]:
+    """Perform a minimal real GPU probe before a kernel compilation request is accepted."""
+    try:
+        torch = import_module("torch")
+    except ModuleNotFoundError:
+        return False, "PyTorch is not installed."
+
+    try:
+        import_module("triton")
+    except ModuleNotFoundError:
+        return False, "Triton is not installed."
+
+    try:
+        if not hasattr(torch, "cuda") or not torch.cuda.is_available():
+            return False, "CUDA/ROCm device is unavailable to PyTorch."
+
+        device = torch.device("cuda")
+        x = torch.randn(1024, device=device, dtype=torch.float32)
+        y = torch.randn(1024, device=device, dtype=torch.float32)
+        z = x + y
+        torch.cuda.synchronize(device)
+        return z.numel() == 1024, "GPU execution probe succeeded."
+    except Exception as exc:  # pragma: no cover - runtime-specific failures are environment-dependent
+        return False, f"GPU execution probe failed: {exc}"
+
+
 def execute_compile_request(request: CompileRunRequest) -> CompileResult:
     """Execute a small, controlled GPU kernel when the runtime supports it.
 
@@ -292,6 +318,13 @@ def execute_compile_request(request: CompileRunRequest) -> CompileResult:
     except InvalidRuntimeCapabilityError as error:
         return CompileRejected(
             reason=str(error),
+            capability=capability,
+        )
+
+    probe_ready, probe_reason = probe_gpu_kernel_execution()
+    if not probe_ready:
+        return CompileRejected(
+            reason=probe_reason,
             capability=capability,
         )
 

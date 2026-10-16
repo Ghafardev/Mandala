@@ -14,6 +14,7 @@ from backend.runtime import (
     RuntimeCapability,
     RuntimeStatus,
     detect_runtime_capability,
+    probe_gpu_kernel_execution,
 )
 
 
@@ -141,3 +142,19 @@ def test_compile_request_rejects_rocm_only_target_on_cuda_runtime() -> None:
     assert request.target_arch == "gfx942"
     assert capability.backend is ComputeBackend.CUDA
     assert capability.backend is not ComputeBackend.ROCM
+
+
+def test_runtime_probe_requires_real_torch_and_triton_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
+    real_import_module = importlib.import_module
+
+    def import_without_torch_or_triton(name: str) -> object:
+        if name in {"torch", "triton"}:
+            raise ModuleNotFoundError(name)
+        return real_import_module(name)
+
+    monkeypatch.setattr("backend.runtime.import_module", import_without_torch_or_triton)
+
+    ready, reason = probe_gpu_kernel_execution()
+
+    assert ready is False
+    assert "PyTorch" in reason or "Triton" in reason
