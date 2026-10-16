@@ -1,7 +1,7 @@
 import React from 'react';
-import {Handle, Position} from 'reactflow';
-import {Play, PlayCircle, Loader2, Gauge, Server, Activity } from 'lucide-react';
-import { ExecutionConfig, TArgetArch } from '../types';
+import { Handle, Position } from 'reactflow';
+import { Play, PlayCircle, Loader2, Gauge, Server, Activity } from 'lucide-react';
+import { ExecutionConfig, TargetArch } from '../../types';
 
 interface ExecutionNodeProps {
     data: {
@@ -27,6 +27,8 @@ export const ExecutionNode: React.FC<ExecutionNodeProps> = ({ data }) => {
         return { name: 'AMD Instinct MI250X (gfx90a)', peak: '383 TFLOPS BF16', mem: '128GB HBM2e (3.2 TB/s)' };
       case 'gfx1100':
         return { name: 'AMD Radeon RX 7900 XTX (gfx1100)', peak: '123 TFLOPS FP16', mem: '24GB GDDR6 (960 GB/s)' };
+      default:
+        return { name: 'Unknown target architecture', peak: 'N/A', mem: 'N/A' };
     }
   };
 

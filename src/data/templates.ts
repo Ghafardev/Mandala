@@ -125,3 +125,26 @@ export interface ChatMessage {
 }
 
 export type CopilotModelOption = 'fast-lite' | 'pro-reasoning' | 'balanced';
+
+export const WORKFLOW_TEMPLATES = [
+  {
+    id: 'gemm-mi300x',
+    name: 'GEMM / MFMA',
+    archTarget: 'gfx942',
+    description: 'Large matrix multiply tuned for MI300X CDNA 3 throughput.',
+  },
+  {
+    id: 'attention-mi250x',
+    name: 'FlashAttention',
+    archTarget: 'gfx90a',
+    description: 'Long-context attention path optimized for MI250X memory locality.',
+  },
+  {
+    id: 'vector-rdna3',
+    name: 'Vector Add / Stream',
+    archTarget: 'gfx1100',
+    description: 'Small, fast kernel benchmark for validation and warmup analysis.',
+  },
+] as const;
+
+export type WorkflowTemplateOption = (typeof WORKFLOW_TEMPLATES)[number];

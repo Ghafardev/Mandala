@@ -10,10 +10,12 @@ import {
   Bookmark,
   ChevronDown,
 } from 'lucide-react';
-import { WORKFLOW_TEMPLATES, WorkflowTemplate } from '../data/templates';
+import { WORKFLOW_TEMPLATES } from '../data/templates';
+
+type WorkflowTemplateOption = (typeof WORKFLOW_TEMPLATES)[number];
 
 interface NavbarProps {
-  onSelectTemplate: (template: WorkflowTemplate) => void;
+  onSelectTemplate: (template: WorkflowTemplateOption) => void;
   onRunKernel: () => void;
   isCompiling: boolean;
   isTelemetryOpen: boolean;
@@ -73,7 +75,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             {WORKFLOW_TEMPLATES.map((tpl) => (
               <button
                 key={tpl.id}
-                onClick={() => onSelectTemplate(tpl)}
+                onClick={() => onSelectTemplate(tpl as WorkflowTemplateOption)}
                 className="flex w-full flex-col rounded-lg p-2 text-left hover:bg-slate-900 transition"
               >
                 <div className="flex items-center justify-between text-xs font-medium text-slate-200">
