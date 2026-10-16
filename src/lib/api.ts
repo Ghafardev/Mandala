@@ -1,4 +1,7 @@
-export const DEFAULT_BACKEND_URL = 'https://stuffed-audience-agenda.ngrok-free.dev';
+const DEFAULT_BACKEND_URL =
+  (typeof window !== 'undefined' && (window as any).__MANDALA_BACKEND_URL) ||
+  (typeof import.meta !== 'undefined' && import.meta.env?.VITE_BACKEND_URL) ||
+  'http://localhost:8000';
 
 function backendToWs(base: string) {
   try {
@@ -10,27 +13,28 @@ function backendToWs(base: string) {
   }
 }
 
+export const DEFAULT_BACKEND = DEFAULT_BACKEND_URL;
+
 export async function fetchWithBackendFallback(
   endpoint: string,
   options: RequestInit = {}
 ): Promise<Response> {
   const targetUrl = `${DEFAULT_BACKEND_URL}${endpoint}`;
 
-  if (typeof window !== 'undefined' && window.location.port === '8000') {
-    return fetch(targetUrl, options);
-  }
-
   try {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 1500);
+    const timer = setTimeout(() => controller.abort(), 2000);
 
     const directRes = await fetch(targetUrl, { ...options, signal: controller.signal });
     clearTimeout(timer);
     if (directRes.ok) {
       return directRes;
     }
+    if (directRes.status >= 400 && directRes.status < 500) {
+      return directRes;
+    }
   } catch {
-    // localhost failed or was blocked by mixed content
+    // local backend unavailable; fall through to relative fetch for local dev
   }
 
   return fetch(endpoint, options);
@@ -46,105 +50,43 @@ export function createTelemetryWebSocket(
 
   const tryConnect = () => {
     if (isCleanedUp) return;
-    onStatusChange('connecting', backendToWs(DEFAULT_BACKEND_URL));
 
-    let localWs: WebSocket | null = null;
-    let fallbackScheduled = false;
+    const target = backendToWs(DEFAULT_BACKEND_URL);
+    onStatusChange('connecting', target);
 
     try {
-      localWs = new WebSocket(backendToWs(DEFAULT_BACKEND_URL));
+      ws = new WebSocket(target);
     } catch {
-      // direct instantiation may fail if protocol is blocked
+      onStatusChange('disconnected', target);
+      if (!isCleanedUp) {
+        retryTimer = setTimeout(tryConnect, 3000);
+      }
+      return;
     }
 
-    const triggerFallback = () => {
-      if (fallbackScheduled || isCleanedUp) return;
-      fallbackScheduled = true;
+    ws.onopen = () => {
+      onStatusChange('connected', target);
+    };
 
+    ws.onmessage = (event) => {
       try {
-        if (localWs) {
-          localWs.onopen = null;
-          localWs.onerror = null;
-          localWs.onclose = null;
-          localWs.close();
-        }
-      } catch {
-        // ignore cleanup errors
-      }
-
-      const fallbackUrl = backendToWs(DEFAULT_BACKEND_URL);
-
-      onStatusChange('connecting', fallbackUrl);
-
-      try {
-        const fbWs = new WebSocket(fallbackUrl);
-        ws = fbWs;
-
-        fbWs.onopen = () => {
-          onStatusChange('connected', fallbackUrl);
-        };
-
-        fbWs.onmessage = (event) => {
-          try {
-            const data = JSON.parse(event.data);
-            onMessage(data);
-          } catch (e) {
-            console.error('Failed to parse telemetry packet', e);
-          }
-        };
-
-        fbWs.onerror = () => {
-          onStatusChange('disconnected', fallbackUrl);
-        };
-
-        fbWs.onclose = () => {
-          onStatusChange('disconnected', fallbackUrl);
-          if (!isCleanedUp) {
-            retryTimer = setTimeout(tryConnect, 3000);
-          }
-        };
-      } catch {
-        onStatusChange('disconnected', fallbackUrl);
-        if (!isCleanedUp) {
-          retryTimer = setTimeout(tryConnect, 4000);
-        }
+        const data = JSON.parse(event.data);
+        onMessage(data);
+      } catch (error) {
+        console.error('Failed to parse telemetry packet', error);
       }
     };
 
-    if (localWs) {
-      ws = localWs;
-      const timeoutId = setTimeout(() => {
-        if (localWs?.readyState !== WebSocket.OPEN) {
-          triggerFallback();
-        }
-      }, 1500);
+    ws.onerror = () => {
+      onStatusChange('disconnected', target);
+    };
 
-      localWs.onopen = () => {
-        clearTimeout(timeoutId);
-        onStatusChange('connected', 'ws://localhost:8000/ws/gpu-telemetry');
-      };
-
-      localWs.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          onMessage(data);
-        } catch (e) {
-          console.error('Failed to parse telemetry packet', e);
-        }
-      };
-
-      localWs.onerror = () => {
-        clearTimeout(timeoutId);
-        triggerFallback();
-      };
-
-      localWs.onclose = () => {
-        clearTimeout(timeoutId);
-        triggerFallback();
-      };
-    } else {
-      triggerFallback();
-    }
+    ws.onclose = () => {
+      onStatusChange('disconnected', target);
+      if (!isCleanedUp) {
+        retryTimer = setTimeout(tryConnect, 3000);
+      }
+    };
   };
 
   tryConnect();

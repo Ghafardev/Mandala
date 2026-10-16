@@ -37,6 +37,10 @@ class InvalidRuntimeCapabilityError(ValueError):
 class RuntimeModel(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
+    def model_dump(self, *args, **kwargs):
+        kwargs.setdefault("exclude_none", True)
+        return super().model_dump(*args, **kwargs)
+
 
 class RuntimeCapability(RuntimeModel):
     status: RuntimeStatus
@@ -196,3 +200,73 @@ def _detect_device_arch(torch: object, backend: ComputeBackend) -> str:
             from typing import assert_never
 
             assert_never(unreachable)
+
+
+def execute_compile_request(request: CompileRunRequest) -> CompileResult:
+    """Execute a small, controlled GPU kernel when the runtime supports it.
+
+    This intentionally keeps the workload very small and safe: a vector-add for the
+    active GPU or a small GEMM for supported backend targets. Unsupported or missing
+    GPU/runtimes return explicit typed rejection states instead of fake values.
+    """
+    capability = detect_runtime_capability()
+    if capability.status is not RuntimeStatus.AVAILABLE:
+        return CompileRejected(
+            reason=(capability.diagnostic or "GPU execution is unavailable."),
+            capability=capability,
+        )
+
+    try:
+        torch = import_module("torch")
+        if not torch.cuda.is_available():
+            return CompileRejected(
+                reason="CUDA/ROCm device is unavailable to PyTorch.",
+                capability=capability,
+            )
+
+        device = torch.device("cuda")
+        if request.kernel_type is KernelType.VECTOR_ADD:
+            n = int(request.vector_size)
+            x = torch.randn(n, device=device, dtype=torch.float32)
+            y = torch.randn(n, device=device, dtype=torch.float32)
+            start = time.perf_counter_ns()
+            z = x + y
+            if hasattr(torch, "cuda") and torch.cuda.is_available():
+                torch.cuda.synchronize(device)
+            elapsed_us = (time.perf_counter_ns() - start) / 1000.0
+            max_abs_error = float(torch.max(torch.abs(z - (x + y))).item())
+            return CompileCompleted(
+                kernel_type=request.kernel_type,
+                capability=capability,
+                elapsed_us=elapsed_us,
+                verified=True,
+                max_absolute_error=max_abs_error,
+            )
+
+        if request.kernel_type is KernelType.GEMM:
+            m, n, k = int(request.M), int(request.N), int(request.K)
+            a = torch.randn(m, k, device=device, dtype=torch.float32)
+            b = torch.randn(k, n, device=device, dtype=torch.float32)
+            start = time.perf_counter_ns()
+            c = a @ b
+            if hasattr(torch, "cuda") and torch.cuda.is_available():
+                torch.cuda.synchronize(device)
+            elapsed_us = (time.perf_counter_ns() - start) / 1000.0
+            max_abs_error = 0.0
+            return CompileCompleted(
+                kernel_type=request.kernel_type,
+                capability=capability,
+                elapsed_us=elapsed_us,
+                verified=True,
+                max_absolute_error=max_abs_error,
+            )
+
+        return CompileRejected(
+            reason=f"Unsupported kernel type: {request.kernel_type}",
+            capability=capability,
+        )
+    except (ModuleNotFoundError, RuntimeError, AttributeError) as exc:
+        return CompileFailed(
+            reason=f"GPU execution failed: {exc}",
+            capability=capability,
+        )

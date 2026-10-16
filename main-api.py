@@ -12,7 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from backend.telemetry import parse_rocm_smi
-from backend.triton_compiler import compile_and_execute_kernel
+from backend.runtime import CompileRunRequest, CompileRejected, execute_compile_request
 from backend.copilot_agent import create_pydantic_ai_agent, fallback_copilot_diagnosis
 
 try:
@@ -235,18 +235,39 @@ async def websocket_gpu_telemetry(websocket: WebSocket):
             pass
 
 @app.post("/api/v1/triton/compile-and-run")
-async def compile_and_run(request: CompileRunRequest):
-    """Compiles and executes Triton kernels dynamically on PyTorch ROCm backend."""
+async def compile_and_run(request_data: dict):
+    """Evaluates a small, safe kernel request against the real runtime capability.
+
+    The frontend sends either the legacy shape or the typed runtime model shape. This
+    route accepts both and converts them into the same backend contract.
+    """
     try:
-        request_data = request.model_dump()
+        payload = dict(request_data)
+        if "kernel_type" not in payload:
+            raise HTTPException(status_code=400, detail="kernel_type is required.")
 
-        request_data["compute_backend"] = detect_compute_backend()
+        # Support the older GUI payload shape by translating it to the typed runtime request.
+        if "vector_size" not in payload and "M" not in payload:
+            payload["vector_size"] = payload.get("vector_size") or payload.get("N")
 
-        # pydantic v2 BaseModel internals differ; pass the dict representation
-        result = compile_and_execute_kernel(request_data)
-        return result
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Kernel compilation failed: {str(e)}")
+        if "kernel_type" in payload and payload["kernel_type"] == "vector_add":
+            payload["kernel_type"] = "vector_add"
+        elif "kernel_type" in payload and payload["kernel_type"] == "gemm":
+            payload["kernel_type"] = "gemm"
+
+        request = CompileRunRequest.model_validate(payload)
+        result = execute_compile_request(request)
+        if isinstance(result, CompileRejected):
+            raise HTTPException(status_code=409, detail=result.model_dump(mode="json"))
+        if isinstance(result, Exception):
+            raise HTTPException(status_code=500, detail=str(result))
+        return result.model_dump(mode="json")
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=exc.errors()) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:  # pragma: no cover - defensive safety net
+        raise HTTPException(status_code=500, detail=f"Kernel compilation failed: {exc}") from exc
 
 
 @app.post("/api/v1/copilot/chat")
