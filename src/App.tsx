@@ -1,15 +1,11 @@
 import React, { useState, useCallback, useEffect } from 'react';
-// @ts-ignore - TSX imports are valid in the app build/runtime and the project JSX config is managed outside this file.
 import { Header } from './components/Header';
-// @ts-ignore
 import { NodeCanvas } from './components/NodeCanvas';
-// @ts-ignore
 import { TelemetryPanel } from './components/TelemetryPanel';
-// @ts-ignore
 import { CopilotSidebar } from './components/CopilotSidebar';
-// @ts-ignore
 import { Mandala3DGraphView } from './components/mandala3d/Mandala3DGraphView';
-import { fetchRuntimeCapability, type RuntimeCapabilityState } from './lib/api';
+import { EnvironmentStatusBanner } from './components/EnvironmentStatusBanner';
+import { createTelemetryWebSocket, fetchRuntimeCapability, type RuntimeCapabilityState } from './lib/api';
 
 export default function App() {
   const [activeView, setActiveView] = useState<'workflow' | '3d-mandala'>('workflow');
@@ -18,6 +14,7 @@ export default function App() {
   const [isTelemetryOpen, setIsTelemetryOpen] = useState(true);
   const [externalPrompt, setExternalPrompt] = useState<string | null>(null);
   const [runtimeCapability, setRuntimeCapability] = useState<RuntimeCapabilityState | null>(null);
+  const [gpuTelemetry, setGpuTelemetry] = useState<any>(null);
 
   const [logs, setLogs] = useState<string[]>([
     `[SYS-INIT] Mandala Low-Code ROCm Studio booting.`,
@@ -57,9 +54,16 @@ export default function App() {
     };
   }, [addLogMessage]);
 
+  useEffect(() => {
+    const cleanup = createTelemetryWebSocket(
+      (data) => setGpuTelemetry(data),
+      () => undefined
+    );
+    return cleanup;
+  }, []);
+
   return (
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-zinc-950 font-sans text-zinc-100 select-none">
-      {/* 1. Header.tsx with View Switcher: [ 🎛️ Workflow & Telemetry View | ☸️ 3D Mandala View ] */}
       <Header
         activeView={activeView}
         onToggleView={setActiveView}
@@ -68,7 +72,10 @@ export default function App() {
         onToggleCopilot={() => setIsCopilotOpen(!isCopilotOpen)}
         isTelemetryOpen={isTelemetryOpen}
         onToggleTelemetry={() => setIsTelemetryOpen(!isTelemetryOpen)}
+        runtimeCapability={runtimeCapability}
       />
+
+      <EnvironmentStatusBanner runtimeCapability={runtimeCapability} telemetry={gpuTelemetry} />
 
       {/* Main Viewport Container with Smooth Transition */}
       <div className="flex flex-1 overflow-hidden relative">

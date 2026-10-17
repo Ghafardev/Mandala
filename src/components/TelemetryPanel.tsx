@@ -27,16 +27,16 @@ export const TelemetryPanel: React.FC<TelemetryPanelProps> = ({
   className = '',
 }) => {
   const [telemetry, setTelemetry] = useState<any>({
-    gpu_utilization: 42.5,
-    vram_used_gb: 72.4,
-    vram_total_gb: 192.0,
-    vram_percent: 37.7,
-    temp_edge_c: 54.2,
-    temp_junction_c: 67.8,
-    power_watts: 320.0,
-    power_cap_watts: 750.0,
-    driver: 'ROCm 6.2.1 (AMD CDNA 3 / KFD)',
-    name: 'AMD Instinct MI300X OAM',
+    gpu_utilization: 0,
+    vram_used_gb: 0,
+    vram_total_gb: 0,
+    vram_percent: 0,
+    temp_edge_c: 0,
+    temp_junction_c: 0,
+    power_watts: 0,
+    power_cap_watts: 0,
+    driver: 'waiting for backend',
+    name: 'Waiting for live GPU telemetry',
   });
 
   const [connectionStatus, setConnectionStatus] = useState<

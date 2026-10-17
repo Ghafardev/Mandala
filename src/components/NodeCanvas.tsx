@@ -57,7 +57,7 @@ const InputTensorNode = ({ data }: { data: any }) => {
           </div>
           <div>
             <h3 className="text-xs font-bold tracking-wide text-zinc-100 uppercase">Input Tensor</h3>
-            <p className="text-[10px] text-zinc-400 font-mono">PyTorch ROCm Buffer (hip:0)</p>
+            <p className="text-[10px] text-zinc-400 font-mono">PyTorch GPU Buffer</p>
           </div>
         </div>
         <span className="rounded bg-cyan-950/60 border border-cyan-800/40 px-2 py-0.5 text-[10px] font-mono text-cyan-300">
@@ -170,7 +170,7 @@ const TritonKernelNode = ({ data }: { data: any }) => {
           </div>
           <div>
             <h3 className="text-xs font-bold tracking-wide text-zinc-100 uppercase">Triton Kernel</h3>
-            <p className="text-[10px] text-zinc-400 font-mono">AMD CDNA 3 / Wave64 JIT</p>
+            <p className="text-[10px] text-zinc-400 font-mono">{data.backendLabel ?? 'GPU JIT'}</p>
           </div>
         </div>
         <span className="rounded bg-violet-950/60 border border-violet-800/40 px-2 py-0.5 text-[10px] font-mono text-violet-300">
@@ -240,7 +240,7 @@ const TritonKernelNode = ({ data }: { data: any }) => {
 // Custom Node 3: Output Evaluation (Shows status & triggers "Run Kernel")
 // ----------------------------------------------------
 const OutputEvaluationNode = ({ data }: { data: any }) => {
-  const { onRunKernel, isCompiling, result } = data;
+  const { onRunKernel, isCompiling, result, disabled, disabledReason } = data;
 
   return (
     <div className="w-88 rounded-xl border border-zinc-700/80 bg-zinc-900/95 text-zinc-100 shadow-2xl backdrop-blur-md transition-all hover:border-emerald-500/60">
@@ -260,7 +260,7 @@ const OutputEvaluationNode = ({ data }: { data: any }) => {
           </div>
           <div>
             <h3 className="text-xs font-bold tracking-wide text-zinc-100 uppercase">Output Evaluation</h3>
-            <p className="text-[10px] text-zinc-400 font-mono">ROCm Verification & Profiler</p>
+            <p className="text-[10px] text-zinc-400 font-mono">{data.backendLabel ?? 'Verification & Profiler'}</p>
           </div>
         </div>
         <span className="rounded bg-emerald-950/60 border border-emerald-800/40 px-2 py-0.5 text-[10px] font-mono text-emerald-300">
@@ -289,14 +289,20 @@ const OutputEvaluationNode = ({ data }: { data: any }) => {
 
         {/* Trigger "Run Kernel" button */}
         <button
-          onClick={onRunKernel}
-          disabled={isCompiling}
+          onClick={disabled ? undefined : onRunKernel}
+          disabled={disabled || isCompiling}
+          title={disabled ? disabledReason : 'Execute the current kernel on the active GPU backend'}
           className="flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-600 px-4 py-2.5 font-semibold text-zinc-950 shadow-lg shadow-emerald-950/40 transition hover:bg-emerald-500 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {isCompiling ? (
             <>
               <Loader2 className="h-4 w-4 animate-spin text-zinc-950" />
-              <span>Executing on ROCm...</span>
+              <span>Executing...</span>
+            </>
+          ) : disabled ? (
+            <>
+              <AlertTriangle className="h-4 w-4" />
+              <span>Execution Disabled</span>
             </>
           ) : (
             <>
@@ -359,13 +365,25 @@ export const NodeCanvas: React.FC<NodeCanvasProps> = ({
 
   // State for Node 3
   const [executionResult, setExecutionResult] = useState<any>(null);
+  const targetArch = runtimeCapability?.backend === 'rocm'
+    ? runtimeCapability.device_arch || 'gfx942'
+    : runtimeCapability?.backend === 'cuda'
+      ? runtimeCapability.device_arch || 'sm80'
+      : 'cpu';
+  const backendLabel = runtimeCapability?.backend === 'rocm'
+    ? 'AMD ROCm / Wave64 JIT'
+    : runtimeCapability?.backend === 'cuda'
+      ? 'NVIDIA CUDA / JIT'
+      : 'Execution disabled: CPU-only';
+  const executionDisabled = !canAttemptKernelExecution(runtimeCapability, targetArch);
 
   // POST request to http://localhost:8000/api/v1/triton/compile-and-run
   const handleRunKernel = useCallback(async () => {
-    const targetArch = 'gfx942';
     if (!canAttemptKernelExecution(runtimeCapability, targetArch)) {
       if (onLogMessage) {
-        onLogMessage(`[BLOCKED] Execution denied: backend ${runtimeCapability?.backend || 'unknown'} is not ready for ${targetArch}.`);
+        onLogMessage(
+          `[BLOCKED] Execution denied: backend ${runtimeCapability?.backend || 'unknown'} is not ready for ${targetArch}.`
+        );
       }
       return;
     }
@@ -373,7 +391,9 @@ export const NodeCanvas: React.FC<NodeCanvasProps> = ({
     setIsCompiling(true);
     if (onLogMessage) {
       onLogMessage(`[DISPATCH] POST http://localhost:8000/api/v1/triton/compile-and-run`);
-      onLogMessage(`[CONFIG] Vector Size: ${vectorSize}, BLOCK_SIZE: ${blockSize}, DType: ${dtype}`);
+      onLogMessage(
+        `[CONFIG] Target: ${targetArch}, Vector Size: ${vectorSize}, BLOCK_SIZE: ${blockSize}, DType: ${dtype}`
+      );
     }
 
     try {
@@ -392,7 +412,7 @@ export const NodeCanvas: React.FC<NodeCanvasProps> = ({
           num_warps: numWarps,
           num_stages: 2,
           dtype: dtype,
-          target_arch: 'gfx942',
+          target_arch: targetArch,
         }),
       });
 
@@ -407,8 +427,10 @@ export const NodeCanvas: React.FC<NodeCanvasProps> = ({
       }
 
       if (onLogMessage) {
-        onLogMessage(`[ROCm-HSA] Kernel compilation successful: ${data.kernel_name}`);
-        onLogMessage(`[METRICS] Latency: ${data.metrics?.latency_us} μs | TFLOPS: ${data.metrics?.achieved_tflops}`);
+        onLogMessage(`[COMPILER] Kernel compilation successful: ${data.kernel_name || 'vector_add'}`);
+        onLogMessage(
+          `[METRICS] Latency: ${data.metrics?.latency_us ?? 'n/a'} μs | TFLOPS: ${data.metrics?.achieved_tflops ?? 'n/a'}`
+        );
         if (data.compiler_log && Array.isArray(data.compiler_log)) {
           data.compiler_log.forEach((line: string) => onLogMessage(`  › ${line}`));
         }
@@ -421,7 +443,17 @@ export const NodeCanvas: React.FC<NodeCanvasProps> = ({
     } finally {
       setIsCompiling(false);
     }
-  }, [vectorSize, blockSize, dtype, numWarps, onLogMessage, onExecutionComplete, setIsCompiling, runtimeCapability]);
+  }, [
+    vectorSize,
+    blockSize,
+    dtype,
+    numWarps,
+    onLogMessage,
+    onExecutionComplete,
+    setIsCompiling,
+    runtimeCapability,
+    targetArch,
+  ]);
 
   // Define custom node types
   const nodeTypes = useMemo(
@@ -459,6 +491,7 @@ export const NodeCanvas: React.FC<NodeCanvasProps> = ({
           setBlockSize,
           numWarps,
           setNumWarps,
+          backendLabel,
         },
       },
       {
@@ -469,6 +502,11 @@ export const NodeCanvas: React.FC<NodeCanvasProps> = ({
           onRunKernel: handleRunKernel,
           isCompiling,
           result: executionResult,
+          disabled: executionDisabled,
+          disabledReason: runtimeCapability?.status === 'available'
+            ? 'This backend cannot run the selected kernel configuration.'
+            : 'No compatible GPU backend detected; switch to a CUDA or ROCm host to enable execution.',
+          backendLabel,
         },
       },
     ],
@@ -480,6 +518,9 @@ export const NodeCanvas: React.FC<NodeCanvasProps> = ({
       handleRunKernel,
       isCompiling,
       executionResult,
+      executionDisabled,
+      backendLabel,
+      runtimeCapability,
     ]
   );
 
@@ -493,7 +534,7 @@ export const NodeCanvas: React.FC<NodeCanvasProps> = ({
         targetHandle: 'kernel-in',
         animated: true,
         style: { stroke: '#06b6d4', strokeWidth: 2.5 },
-        label: 'PyTorch hip:0',
+        label: 'GPU stream',
         labelStyle: { fill: '#71717a', fontSize: 10, fontFamily: 'monospace' },
         labelBgStyle: { fill: '#09090b', fillOpacity: 0.9 },
       },
@@ -505,7 +546,7 @@ export const NodeCanvas: React.FC<NodeCanvasProps> = ({
         targetHandle: 'eval-in',
         animated: true,
         style: { stroke: '#a855f7', strokeWidth: 2.5 },
-        label: 'AMD Wave64 HSA',
+        label: 'Kernel output',
         labelStyle: { fill: '#71717a', fontSize: 10, fontFamily: 'monospace' },
         labelBgStyle: { fill: '#09090b', fillOpacity: 0.9 },
       },
@@ -529,7 +570,7 @@ export const NodeCanvas: React.FC<NodeCanvasProps> = ({
         if (n.id === 'node-2') {
           return {
             ...n,
-            data: { blockSize, setBlockSize, numWarps, setNumWarps },
+            data: { blockSize, setBlockSize, numWarps, setNumWarps, backendLabel },
           };
         }
         if (n.id === 'node-3') {
@@ -539,6 +580,11 @@ export const NodeCanvas: React.FC<NodeCanvasProps> = ({
               onRunKernel: handleRunKernel,
               isCompiling,
               result: executionResult,
+              disabled: executionDisabled,
+              disabledReason: runtimeCapability?.status === 'available'
+                ? 'This backend cannot run the selected kernel configuration.'
+                : 'No compatible GPU backend detected; switch to a CUDA or ROCm host to enable execution.',
+              backendLabel,
             },
           };
         }
@@ -553,6 +599,9 @@ export const NodeCanvas: React.FC<NodeCanvasProps> = ({
     handleRunKernel,
     isCompiling,
     executionResult,
+    executionDisabled,
+    backendLabel,
+    runtimeCapability,
     setNodes,
   ]);
 
