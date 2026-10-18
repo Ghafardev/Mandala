@@ -7,12 +7,15 @@ mandala is a GUI based dashboard application. The main functions is to develop, 
 Installation tutorial :
 
 clone this project with this script
+
  git clone https://github.com/Ghafardev/Mandala.git
 
 dont forget to install npm and the required packages.
+
  npm install
 
 run software
+
  npm run dev
 
 application will open in http://localhost:3000 . access it from your favourite browser
@@ -23,6 +26,7 @@ also activate .venv for backend FastAPIservices ( optional )
 
  // for windows 
  .venv\Scripts\Activate
+
  // for linux
  source .venv/bin/activate
  
