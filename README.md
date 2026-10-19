@@ -1,36 +1,35 @@
-# Mandala - AMD ROCm and Triton kernel inference for AI/LLM Training, CUDA Translation with GUI interface.
+# Mandala - AMD ROCm and Triton kernel inference for AI/LLM Training, with GUI interface.
 
-In Indonesian and Sanskrit cultures, Mandala symbolizes an energy center, an integrated structure, and a map of the cosmos. In the context of this application, Mandala represents a central command hub that brings together the entire complexity of the ROCm, Triton kernel, and LLM ecosystems into one harmonious interface.
+**AMD Developer Hackathon ACT III — Track: Intelligent Industry**
+**License: Apache 2.0 | Owner: Ghafardev | 2026**
 
-mandala is a GUI based dashboard application. The main functions is to develop, train, and engineer LLM/AI models with ROCm and its stack, up to the kernel level; like triton, with a GUI-based low code interface, and help migration from CUDA based workflow without having to struggle with cli manual coding that takes a lot of time to remember every line of code, especially for beginners.
+> In Sanskrit, Mandala is the energy center. Here, Mandala is the command center that unifies ROCm, Triton, HIP, PyTorch & TensorFlow into one GUI — so you can engineer kernels and train LLMs without memorizing 1000 CLI commands.
 
-Installation tutorial :
+**Problem:** 90% of AI training tutorials are CUDA-only. Beginners and even pros waste days translating CUDA workflows to ROCm, writing Triton kernels by hand in CLI.
 
-clone this project with this script
+**Solution:** Mandala is a low-code GUI dashboard that:
+1.  Translates CUDA workflows to ROCm/HIP automatically
+2.  Lets you develop, autotune, and deploy Triton kernels visually
+3.  Trains LLMs with PyTorch/TensorFlow directly on AMD stack (ROCm)
 
- git clone https://github.com/Ghafardev/Mandala.git
+**Built for AMD:**
+- Runs on AMD Developer Cloud / MI300X / Radeon via ROCm
+- Kernel layer: Triton + HIP
+- AI layer: PyTorch, TensorFlow, ROCm libraries
+- Backend: FastAPI (Python) | Frontend: Next.js
 
-dont forget to install npm and the required packages.
+**Demo (Oct 18, 2026 MVP):**
+- [Live Demo Video] 
+- Runs at: http://localhost:3000 (frontend) + http://localhost:8000 (FastAPI)
 
- npm install
-
-run software
-
- npm run dev
-
-application will open in http://localhost:3000 . access it from your favourite browser
-
-also activate .venv for backend FastAPIservices ( optional )
-
- python -m venv .venv
-
- // for windows 
- .venv\Scripts\Activate
-
- // for linux
- source .venv/bin/activate
- 
- pip install requirements.txt
- python main-api.py
-
-Fastapi will actived in http://localhost:8000
+**Quick Start:**
+```bash
+git clone https://github.com/Ghafardev/Mandala.git
+cd Mandala
+npm install
+npm run dev
+# backend
+python -m venv .venv
+source .venv/bin/activate # or .venv\Scripts\Activate on Windows
+pip install -r requirements.txt
+python main-api.py
