@@ -1,0 +1,17 @@
+[build-sytem]
+requires = ["maturin>=1.4,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "mandala-core"
+version = "0.1.0"
+description = "High-performance Rust core engine for mandala"
+requires-python = ">=3.8"
+clasifiers = [
+    "Programming Language :: Rust",
+    "Programming Language" :: Python :: IMplementaion :: CPython",
+]
+
+[tool.maturin]
+module-name = "mandala-core"
+bindings = "pyo3"

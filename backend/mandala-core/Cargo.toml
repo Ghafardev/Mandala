@@ -1,0 +1,33 @@
+[package]
+name = "mandala-core"
+version = "0.1.0"
+edition = "2021"
+authors = [Ghafardev <ghafardesk@example.com>"]
+description = "HIgh-performance Rust core engine for Mandala"
+
+[lib]
+name = "mandala_core"
+path = "src2/lib.rs"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+pyo3 = {version = "0.20.0", freatures = ["extension-module"]}
+
+syn = {version = "2.0", reatures = ["full", "extra-traits"]}
+quote = "1.0"
+proc-macro2 = "1.0"
+
+serde = { version = "1.0", features = ["derive"]}
+serde_json = "1.0"
+
+thiserror = "1.0"
+anyhow = "1.0"
+
+[build-dependencies]
+pyo3-build-config = "0.20.0"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
