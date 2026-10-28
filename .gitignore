@@ -5,3 +5,9 @@ coverage/
 .env*
 !.env.example
 colab_setup_T4.ipnyb
+.omo/
+.omop/
+__pycache__
+__pycache__/
+*.py[cod]
+backend/db/*.db
