@@ -5,7 +5,9 @@ Exposes WebSocket telemetry, dynamic Triton compilation, and AI Copilot endpoint
 """
 import asyncio
 import json
+import os
 import subprocess
+from contextlib import asynccontextmanager
 from typing import Dict, Any, Optional
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -23,11 +25,21 @@ from backend.copilot_agent import create_pydantic_ai_agent, fallback_copilot_dia
 
 from backend.routers.auth import router as auth_router
 from backend.routers.task import task_router
+from backend.database import initialize_database
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    """Create the local SQLite schema before serving the first request."""
+    await asyncio.to_thread(initialize_database)
+    yield
+
 
 app = FastAPI(
     title="Mandala - AMD ROCm & Triton API Engine",
     description="Low-code API engine to compile Triton kernels and stream ROCm/CUDA hardware telemetry",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan,
 )
 
 # Enable CORS for local Next.js / Vite client
@@ -293,4 +305,4 @@ async def copilot_chat(request: CopilotChatRequest):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("MANDALA_PORT", "8000")))

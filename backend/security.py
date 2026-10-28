@@ -70,7 +70,8 @@ BACKEND_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = BACKEND_DIR.parent
 
 # Canonical local database file -> backend/db/mandala.db
-DB_PATH = str(BACKEND_DIR / "db" / "mandala.db")
+# Override with MANDALA_DB_PATH for tests, smoke runs, or an alternate install.
+DB_PATH = os.getenv("MANDALA_DB_PATH", str(BACKEND_DIR / "db" / "mandala.db"))
 
 # The signing secret must be stable across restarts, otherwise every existing
 # session cookie becomes invalid. Override it in production via the environment.
