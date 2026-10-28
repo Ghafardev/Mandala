@@ -27,6 +27,9 @@ try:
 except ImportError:
     parse_rocm_smi = None
 
+from routers.tasks import task_router
+
+
 
 app = FastAPI(
     title="Mandala - AMD ROCm & Triton API Engine",
@@ -42,6 +45,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(task_router)
 
 # Initialize Pydantic AI agent if available
 copilot_agent = create_pydantic_ai_agent()
