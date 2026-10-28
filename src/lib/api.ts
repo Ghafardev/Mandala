@@ -59,20 +59,15 @@ export async function fetchWithBackendFallback(
 ): Promise<Response> {
   const targetUrl = `${DEFAULT_BACKEND_URL}${endpoint}`;
 
-  try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 2000);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 2000);
 
-    const directRes = await fetch(targetUrl, { ...options, signal: controller.signal });
-    clearTimeout(timer);
-    if (directRes.ok) {
-      return directRes;
-    }
-    if (directRes.status >= 400 && directRes.status < 500) {
-      return directRes;
-    }
+  try {
+    return await fetch(targetUrl, { ...options, signal: controller.signal });
   } catch {
     // local backend unavailable; fall through to relative fetch for local dev
+  } finally {
+    clearTimeout(timer);
   }
 
   return fetch(endpoint, options);
