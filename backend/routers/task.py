@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends
 import aiosqlite
-from security import DB_PATH, get_current_user
+from backend.security import DB_PATH, get_current_user
 
 task_router = APIRouter(prefix="/api/tasks", tags=["Task History"])
 

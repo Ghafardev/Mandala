@@ -11,7 +11,6 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, ValidationError
 
-from backend.telemetry import parse_rocm_smi
 from backend.runtime import (
     CompileRejected,
     CompileRunRequest,
@@ -22,14 +21,8 @@ from backend.runtime import (
 )
 from backend.copilot_agent import create_pydantic_ai_agent, fallback_copilot_diagnosis
 
-try:
-    from backend.telemetry import parse_rocm_smi
-except ImportError:
-    parse_rocm_smi = None
-
-from routers.tasks import task_router
-
-
+from backend.routers.auth import router as auth_router
+from backend.routers.task import task_router
 
 app = FastAPI(
     title="Mandala - AMD ROCm & Triton API Engine",
@@ -46,6 +39,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(auth_router)
 app.include_router(task_router)
 
 # Initialize Pydantic AI agent if available

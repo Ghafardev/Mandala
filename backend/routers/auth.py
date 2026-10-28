@@ -23,7 +23,7 @@ import aiosqlite
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel, Field
 
-from security import (
+from backend.security import (
     DB_PATH,
     SESSION_COOKIE_MAX_AGE,
     SESSION_COOKIE_NAME,
