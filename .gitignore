@@ -1,13 +1,57 @@
+# Node / frontend
 node_modules/
+dist/
+build/
 coverage/
-.DS_Store/
-*.log
-.env*
-!.env.example
-colab_setup_T4.ipnyb
-.omo/
-.omop/
-__pycache__
+.npm/
+.parcel-cache/
+.vite/
+*.tsbuildinfo
+
+# Python environment / caches
+.venv/
+venv/
+env/
 __pycache__/
 *.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.python-version
+.pyre/
+
+# Local app runtime / database state
 backend/db/*.db
+backend/db/*.sqlite
+backend/db/*.sqlite3
+*.db
+*.sqlite
+*.sqlite3
+
+# Secrets / local config
+.env
+.env.*
+!.env.example
+
+# Logs / temp / OS files
+*.log
+*.pid
+*.tmp
+.DS_Store
+Thumbs.db
+
+# Local editor / tool metadata
+.vscode/
+.idea/
+.codegraph/
+.playwright-mcp/
+.omo/
+.omop/
+
+# Project-local scratch / notebooks
+colab_setup_T4.ipynb
+source inspirations/
+
+# Common generated bundles
+*.tgz
+*.tar.gz
