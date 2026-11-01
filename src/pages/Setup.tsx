@@ -17,7 +17,7 @@ import {
 } from 'lucide-react';
 import { fetchWithBackendFallback } from '../lib/api';
 
-export type VoiceCharacter = 'koji_engineer' | 'koji_guide';
+export type VoiceCharacter = 'reiji_engineer' | 'reiji_guide';
 
 export interface SetupProps {
   /** Called after `POST /api/auth/setup` succeeds and the session cookie is set. */
@@ -38,14 +38,14 @@ const VOICE_OPTIONS: Array<{
   icon: React.ComponentType<{ className?: string }>;
 }> = [
   {
-    id: 'koji_engineer',
-    title: 'Koji · Engineer',
+    id: 'reiji_engineer',
+    title: 'Reiji · Engineer',
     blurb: 'Terse, compiler-grade diagnostics. Kernel diffs, wavefront tuning, ROCm flags.',
     icon: Wrench,
   },
   {
-    id: 'koji_guide',
-    title: 'Koji · Guide',
+    id: 'reiji_guide',
+    title: 'Reiji · Guide',
     blurb: 'Step-by-step mentoring for Triton, HIP and PyTorch workflows.',
     icon: Compass,
   },
@@ -92,7 +92,7 @@ export const Setup: React.FC<SetupProps> = ({ onSetupComplete }) => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [rocmPath, setRocmPath] = useState('/opt/rocm');
-  const [voiceCharacter, setVoiceCharacter] = useState<VoiceCharacter>('koji_engineer');
+  const [voiceCharacter, setVoiceCharacter] = useState<VoiceCharacter>('reiji_engineer');
   const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
