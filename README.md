@@ -1,9 +1,21 @@
 # Mandala - AMD ROCm and Triton kernel inference for AI/LLM Training, with GUI interface.
 
+<table>
+  <tr>
+    <td><img src="demonstration-info/mandalanewauthpage.PNG" width="300" alt="Login Page"></td>
+    <td><img src="demonstration-info/mandalanodewidgetlatest.PNG" width="300" alt="Node Widget"></td>
+  </tr>
+  <tr>
+    <td><img src="demonstration-info/mandala3dgraphlatest.PNG" width="300" alt="3d Graph"></td>
+    <td><img src="demonstration-info/mandalalatest.PNG" width="300" alt="Homepage"></td>
+  </tr>
+</table>
+
+
 **AMD Developer Hackathon ACT III — Track: Intelligent Industry**
 **License: Apache 2.0 | Owner: Ghafardev | 2026**
 
-> In Sanskrit, Mandala is the energy center. Here, Mandala is the command center that unifies ROCm, Triton, HIP, PyTorch & TensorFlow into one GUI — so you can engineer kernels and train LLMs without memorizing 1000 CLI commands.
+ In Sanskrit, Mandala is the energy center. Here, Mandala is the command center that unifies ROCm, Triton, HIP, PyTorch & TensorFlow into one GUI — so you can engineer kernels and train LLMs without memorizing 1000 CLI commands.
 
 **Problem:** 90% of AI training tutorials are CUDA-only. Beginners and even pros waste days translating CUDA workflows to ROCm, writing Triton kernels by hand in CLI.
 
