@@ -37,7 +37,7 @@ router = APIRouter(prefix="/api/auth", tags=["Authentication & Setup"])
 
 SESSION_COOKIE_PATH = "/"
 DEFAULT_ROCM_PATH = "/opt/rocm"
-DEFAULT_VOICE_CHARACTER = "koji_engineer"
+DEFAULT_VOICE_CHARACTER = "reji_engineer"
 
 
 # ---------------------------------------------------------------------------
@@ -49,7 +49,7 @@ class SetupRequest(BaseModel):
     username: str = Field(min_length=3, max_length=64)
     password: str = Field(min_length=8, max_length=256)
     rocm_path: str = Field(default=DEFAULT_ROCM_PATH, max_length=512)
-    voice_character: Literal["koji_engineer", "koji_guide"] = DEFAULT_VOICE_CHARACTER
+    voice_character: Literal["reji_engineer", "reji_guide"] = DEFAULT_VOICE_CHARACTER
 
 
 class LoginRequest(BaseModel):
@@ -184,7 +184,7 @@ async def initial_setup(payload: SetupRequest, response: Response) -> dict[str, 
             "ai_voice_character",
             payload.voice_character,
             "voice_assistant",
-            "Active sound character (koji_engineer / koji_guide)",
+            "Active sound character (reji_engineer / reji_guide)",
         )
         await _upsert_config(
             db,
