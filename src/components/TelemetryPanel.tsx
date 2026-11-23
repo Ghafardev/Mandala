@@ -115,8 +115,10 @@ export const TelemetryPanel: React.FC<TelemetryPanelProps> = ({
   };
 
   const tempColor = getTempColor(telemetry.temp_edge_c);
-  const cpuOverall = cpu?.status?.overall_utilization ?? 0;
+  const cpuSpecs = cpu?.specs;
   const perCore = cpu?.status?.per_core_utilization ?? [];
+  const cpuOverall = cpu?.status?.overall_utilization ?? 0;
+  const loadAverage = cpu?.status?.load_average;
   const maxCore = perCore.length > 0 ? Math.max(...perCore) : 0;
 
   // Bottleneck detection comparing CPU pressure against GPU demand
@@ -165,7 +167,7 @@ export const TelemetryPanel: React.FC<TelemetryPanelProps> = ({
           </div>
 
           <span className="hidden md:inline text-[11px] font-mono text-zinc-400">
-            {gpuAvailable ? telemetry.name : cpu?.specs?.cpu_model || 'CPU-only device'}
+            {gpuAvailable ? telemetry.name : 'CPU-only host'}
           </span>
         </div>
 
@@ -211,7 +213,7 @@ export const TelemetryPanel: React.FC<TelemetryPanelProps> = ({
         <div className="flex flex-1 flex-col md:flex-row overflow-hidden">
           {/* Left: 3 Visual Progress Bars (VRAM Usage, GPU Temperature, Compute Utilization) */}
           <div className="w-full md:w-96 shrink-0 border-b md:border-b-0 md:border-r border-zinc-800/80 hover:border-[#FB8500]/30 p-4 space-y-4 bg-[#0E1017]/70 backdrop-blur-sm overflow-y-auto transition-colors">
-            {/* CPU Status (always available, even on CPU-only devices) */}
+            {/* CPU status (always available, even on CPU-only devices) */}
             <div className="space-y-1.5">
               <div className="flex items-center justify-between text-xs">
                 <span className="flex items-center gap-1.5 text-zinc-300 font-medium">
@@ -230,35 +232,31 @@ export const TelemetryPanel: React.FC<TelemetryPanelProps> = ({
               </div>
 
               {/* Core grid: one square per logical thread */}
-              {perCore.length > 0 && (
-                <div className="grid grid-cols-8 gap-1 pt-0.5">
-                  {perCore.map((value, index) => (
-                    <div
-                      key={index}
-                      title={`Core ${index}: ${value.toFixed(0)}%`}
-                      className={`h-3 rounded-sm ${getCoreColor(value)} transition-colors`}
-                    />
-                  ))}
-                </div>
-              )}
+              <div className="grid grid-cols-8 gap-1 pt-0.5">
+                {perCore.map((value, index) => (
+                  <div
+                    key={index}
+                    title={`Core ${index}: ${value.toFixed(0)}%`}
+                    className={`h-3 rounded-sm ${getCoreColor(value)} transition-colors`}
+                  />
+                ))}
+              </div>
 
               <div className="flex items-center justify-between gap-2 font-mono text-[10px] text-zinc-400">
-                <span className="truncate" title={cpu?.specs?.cpu_model || 'Unknown CPU'}>
-                  {cpu?.specs?.cpu_model || 'Waiting for CPU telemetry'}
+                <span className="truncate" title={cpuSpecs?.cpu_model ?? ''}>
+                  {cpuSpecs?.cpu_model || 'Waiting for CPU telemetry'}
                 </span>
-                <span className="shrink-0 text-[#FFB703]">
-                  {Array.isArray(cpu?.status?.load_average)
-                    ? `Load ${cpu!.status!.load_average[0]}`
-                    : `${cpu?.specs?.total_cores ?? 0} threads`}
+                <span className="shrink-0">
+                  {cpuSpecs?.physical_cores ?? 0}c / {cpuSpecs?.total_cores ?? 0}t
                 </span>
               </div>
               <div className="flex items-center justify-between font-mono text-[10px] text-zinc-500">
                 <span>
-                  {cpu?.specs?.physical_cores ?? 0} cores / {cpu?.specs?.total_cores ?? 0} threads
+                  {Array.isArray(loadAverage) ? `Load ${loadAverage[0]}` : 'Load N/A'}
                 </span>
                 <span>
-                  {typeof cpu?.specs?.frequency_mhz === 'number'
-                    ? `${(cpu.specs.frequency_mhz / 1000).toFixed(2)} GHz`
+                  {typeof cpuSpecs?.frequency_mhz === 'number'
+                    ? `${(cpuSpecs.frequency_mhz / 1000).toFixed(2)} GHz`
                     : 'Clock N/A'}
                 </span>
               </div>
@@ -355,8 +353,7 @@ export const TelemetryPanel: React.FC<TelemetryPanelProps> = ({
               </>
             ) : (
               <div className="rounded border border-zinc-800 bg-zinc-900/60 px-2.5 py-2 text-[10px] font-mono leading-relaxed text-zinc-400">
-                No GPU backend detected. Live CPU telemetry is shown above; GPU metrics
-                are hidden on CPU-only devices.
+                No GPU backend detected — live CPU telemetry only.
               </div>
             )}
           </div>

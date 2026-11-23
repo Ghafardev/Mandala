@@ -110,18 +110,16 @@ export interface CpuSpecs {
   cpu_model: string;
   physical_cores: number | null;
   total_cores: number | null;
-  frequency_mhz: number | 'N/A';
+  frequency_mhz: number | null;
 }
 
 export interface CpuStatus {
   overall_utilization: number;
   per_core_utilization: number[];
-  load_average: number[] | 'N/A';
+  load_average: number[] | null;
 }
 
 export interface CpuTelemetry {
-  backend: string;
-  vendor: string;
   specs?: CpuSpecs;
   status?: CpuStatus;
 }
