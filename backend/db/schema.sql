@@ -38,4 +38,4 @@ INSERT OR IGNORE INTO system_config (key, value, category, description) VALUES
 ('rocm_path', '/opt/rocm', 'hardware', 'Path instalation AMD ROCm on system'),
 ('default_wavefront', '64', 'transpiler', 'Default Wavefront (64 for AMD CDNA, 32 for RDNA/CUDA)'),
 ('strict_gpu_mode', 'false', 'hardware', 'If true,abort ececution if there is no AMD GPU'),
-('ai_voice_character', 'reji_engineer', 'voice_assistant', 'Active sound character (reji_engineer / reji_guide)');
+('ai_voice_character', 'reiji_engineer', 'voice_assistant', 'Active sound character (reiji_engineer / reji_guide)');

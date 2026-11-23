@@ -6,6 +6,7 @@ Exposes WebSocket telemetry, dynamic Triton compilation, and AI Copilot endpoint
 import asyncio
 import json
 import os
+import platform
 import subprocess
 from contextlib import asynccontextmanager
 from typing import Dict, Any, Optional
@@ -62,6 +63,60 @@ class CopilotChatRequest(BaseModel):
     message: str
     conversation_history: Optional[list] = []
     current_kernel_context: Optional[Dict[str, Any]] = None
+
+
+def get_cpu_telemetry() -> Dict[str, Any]:
+    """Read system-wide CPU specifications and live status via psutil."""
+    try:
+        import psutil
+    except ModuleNotFoundError:
+        return {
+            "backend": "unavailable",
+            "vendor": "Unknown",
+            "status": "error",
+            "message": "psutil is not installed; run pip install psutil.",
+        }
+
+    try:
+        per_core = [round(value, 1) for value in psutil.cpu_percent(interval=None, percpu=True)]
+    except Exception:
+        per_core = []
+
+    overall = round(sum(per_core) / len(per_core), 1) if per_core else 0.0
+
+    try:
+        frequency_mhz: Any = round(psutil.cpu_freq().current, 0)
+    except Exception:
+        frequency_mhz = "N/A"
+
+    try:
+        load_average: Any = [round(value, 2) for value in psutil.getloadavg()]
+    except (AttributeError, OSError):
+        load_average = "N/A"
+
+    try:
+        physical_cores: Any = psutil.cpu_count(logical=False)
+        total_cores: Any = psutil.cpu_count(logical=True)
+    except Exception:
+        physical_cores = total_cores = None
+
+    cpu_model = platform.processor() or platform.uname().processor or "Unknown"
+
+    return {
+        "backend": "psutil",
+        "vendor": cpu_model,
+        "specs": {
+            "cpu_model": cpu_model,
+            "physical_cores": physical_cores,
+            "total_cores": total_cores,
+            "frequency_mhz": frequency_mhz,
+        },
+        "status": {
+            "overall_utilization": overall,
+            "per_core_utilization": per_core,
+            "load_average": load_average,
+        },
+    }
 
 
 def get_rocm_telemetry() -> Dict[str, Any]:
@@ -178,6 +233,14 @@ def get_gpu_telemetry_universal() -> Dict[str, Any]:
         },
     }
 
+def get_hardware_telemetry() -> Dict[str, Any]:
+    """Combine CPU telemetry (always available) with the detected GPU backend."""
+    gpu_telemetry = get_gpu_telemetry_universal()
+    if not isinstance(gpu_telemetry, dict):
+        gpu_telemetry = {"backend": "none", "vendor": "unknown", "status": "error"}
+    return {**gpu_telemetry, "cpu": get_cpu_telemetry()}
+
+
 def detect_compute_backend() -> str:
     capability = detect_runtime_capability()
     return capability.backend.value
@@ -209,12 +272,11 @@ async def health_check():
 
 @app.websocket("/ws/gpu-telemetry")
 async def websocket_gpu_telemetry(websocket: WebSocket):
-    """Streams real-time GPU VRAM, compute usage, temperature, and power via ROCm SMI."""
+    """Streams real-time CPU status plus GPU VRAM, usage, temperature, and power."""
     await websocket.accept()
     try:
         while True:
-            telemetry = get_gpu_telemetry_universal()
-            await websocket.send_json(telemetry)
+            await websocket.send_json(get_hardware_telemetry())
             await asyncio.sleep(1.0)
 
     except WebSocketDisconnect:

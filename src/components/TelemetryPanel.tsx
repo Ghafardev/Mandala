@@ -12,8 +12,11 @@ import {
   ChevronDown,
   ChevronUp,
   Maximize2,
+  Cpu,
+  AlertTriangle,
 } from 'lucide-react';
 import { createTelemetryWebSocket } from '../lib/api';
+import type { CpuTelemetry } from '../types';
 
 export interface TelemetryPanelProps {
   logs?: string[];
@@ -39,6 +42,8 @@ export const TelemetryPanel: React.FC<TelemetryPanelProps> = ({
     name: 'Waiting for live GPU telemetry',
   });
 
+  const [cpu, setCpu] = useState<CpuTelemetry | null>(null);
+  const [gpuAvailable, setGpuAvailable] = useState<boolean>(false);
   const [connectionStatus, setConnectionStatus] = useState<
     'connected' | 'connecting' | 'disconnected'
   >('connecting');
@@ -53,7 +58,16 @@ export const TelemetryPanel: React.FC<TelemetryPanelProps> = ({
   useEffect(() => {
     const cleanup = createTelemetryWebSocket(
       (data) => {
-        if (data?.gpus && data.gpus.length > 0) {
+        if (data?.cpu) {
+          setCpu(data.cpu);
+        }
+
+        const hasGpuDevices = Array.isArray(data?.gpus) && data.gpus.length > 0;
+        setGpuAvailable(
+          hasGpuDevices || data?.backend === 'rocm' || data?.backend === 'cuda'
+        );
+
+        if (hasGpuDevices) {
           const primaryGpu = data.gpus[0];
           setTelemetry({
             gpu_utilization: primaryGpu.gpu_utilization ?? 0,
@@ -92,7 +106,27 @@ export const TelemetryPanel: React.FC<TelemetryPanelProps> = ({
     return { text: 'text-[#E63946]', bar: 'bg-gradient-to-r from-[#FB8500] to-[#E63946]' };
   };
 
+  // Per-core color ramp for the CPU core grid (gold -> orange -> red)
+  const getCoreColor = (value: number) => {
+    if (value >= 85) return 'bg-[#E63946]';
+    if (value >= 50) return 'bg-[#FB8500]';
+    if (value >= 15) return 'bg-[#FFD700]';
+    return 'bg-zinc-700';
+  };
+
   const tempColor = getTempColor(telemetry.temp_edge_c);
+  const cpuOverall = cpu?.status?.overall_utilization ?? 0;
+  const perCore = cpu?.status?.per_core_utilization ?? [];
+  const maxCore = perCore.length > 0 ? Math.max(...perCore) : 0;
+
+  // Bottleneck detection comparing CPU pressure against GPU demand
+  const bottleneck = !gpuAvailable
+    ? null
+    : cpuOverall >= 85 && telemetry.gpu_utilization < 40
+      ? 'CPU Bottleneck Detected: data loading is slowing down training.'
+      : maxCore >= 85 && cpuOverall < 50
+        ? 'Single-core bottleneck: one thread is saturated while the rest idle.'
+        : null;
 
   return (
     <div
@@ -106,7 +140,7 @@ export const TelemetryPanel: React.FC<TelemetryPanelProps> = ({
           <div className="flex items-center gap-2">
             <Activity className="h-4 w-4 text-[#FFD700]" />
             <span className="text-xs font-bold tracking-wider text-[#FFD700] uppercase">
-              GPU TELEMETRY & LOGS
+              HARDWARE TELEMETRY & LOGS
             </span>
           </div>
 
@@ -131,7 +165,7 @@ export const TelemetryPanel: React.FC<TelemetryPanelProps> = ({
           </div>
 
           <span className="hidden md:inline text-[11px] font-mono text-zinc-400">
-            {telemetry.name}
+            {gpuAvailable ? telemetry.name : cpu?.specs?.cpu_model || 'CPU-only device'}
           </span>
         </div>
 
@@ -176,7 +210,69 @@ export const TelemetryPanel: React.FC<TelemetryPanelProps> = ({
       {isExpanded && (
         <div className="flex flex-1 flex-col md:flex-row overflow-hidden">
           {/* Left: 3 Visual Progress Bars (VRAM Usage, GPU Temperature, Compute Utilization) */}
-          <div className="w-full md:w-80 shrink-0 border-b md:border-b-0 md:border-r border-zinc-800/80 hover:border-[#FB8500]/30 p-4 space-y-4 bg-[#0E1017]/70 backdrop-blur-sm overflow-y-auto transition-colors">
+          <div className="w-full md:w-96 shrink-0 border-b md:border-b-0 md:border-r border-zinc-800/80 hover:border-[#FB8500]/30 p-4 space-y-4 bg-[#0E1017]/70 backdrop-blur-sm overflow-y-auto transition-colors">
+            {/* CPU Status (always available, even on CPU-only devices) */}
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between text-xs">
+                <span className="flex items-center gap-1.5 text-zinc-300 font-medium">
+                  <Cpu className="h-3.5 w-3.5 text-[#FFD700]" />
+                  CPU Utilization
+                </span>
+                <span className="font-mono text-[11px] text-[#FFD700] font-semibold">
+                  {cpuOverall.toFixed(1)}%
+                </span>
+              </div>
+              <div className="h-2 w-full overflow-hidden rounded-full bg-zinc-900 border border-zinc-800 hover:border-[#FB8500]/40 transition-colors">
+                <div
+                  className="h-full bg-gradient-to-r from-[#FFB703] to-[#FFD700] transition-all duration-300 ease-out shadow-sm shadow-amber-500/20"
+                  style={{ width: `${Math.min(100, cpuOverall)}%` }}
+                />
+              </div>
+
+              {/* Core grid: one square per logical thread */}
+              {perCore.length > 0 && (
+                <div className="grid grid-cols-8 gap-1 pt-0.5">
+                  {perCore.map((value, index) => (
+                    <div
+                      key={index}
+                      title={`Core ${index}: ${value.toFixed(0)}%`}
+                      className={`h-3 rounded-sm ${getCoreColor(value)} transition-colors`}
+                    />
+                  ))}
+                </div>
+              )}
+
+              <div className="flex items-center justify-between gap-2 font-mono text-[10px] text-zinc-400">
+                <span className="truncate" title={cpu?.specs?.cpu_model || 'Unknown CPU'}>
+                  {cpu?.specs?.cpu_model || 'Waiting for CPU telemetry'}
+                </span>
+                <span className="shrink-0 text-[#FFB703]">
+                  {Array.isArray(cpu?.status?.load_average)
+                    ? `Load ${cpu!.status!.load_average[0]}`
+                    : `${cpu?.specs?.total_cores ?? 0} threads`}
+                </span>
+              </div>
+              <div className="flex items-center justify-between font-mono text-[10px] text-zinc-500">
+                <span>
+                  {cpu?.specs?.physical_cores ?? 0} cores / {cpu?.specs?.total_cores ?? 0} threads
+                </span>
+                <span>
+                  {typeof cpu?.specs?.frequency_mhz === 'number'
+                    ? `${(cpu.specs.frequency_mhz / 1000).toFixed(2)} GHz`
+                    : 'Clock N/A'}
+                </span>
+              </div>
+            </div>
+
+            {bottleneck && (
+              <div className="flex items-start gap-1.5 rounded border border-[#E63946]/40 bg-[#E63946]/10 px-2 py-1.5 text-[10px] font-mono leading-relaxed text-[#E63946]">
+                <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
+                <span>{bottleneck}</span>
+              </div>
+            )}
+
+            {gpuAvailable ? (
+              <>
             {/* Metric 1: VRAM Usage (Primary Accent - Solar Gold #FFD700 / #FFB703) */}
             <div className="space-y-1.5">
               <div className="flex items-center justify-between text-xs">
@@ -256,6 +352,13 @@ export const TelemetryPanel: React.FC<TelemetryPanelProps> = ({
                 {telemetry.power_watts.toFixed(0)}W / {telemetry.power_cap_watts}W
               </span>
             </div>
+              </>
+            ) : (
+              <div className="rounded border border-zinc-800 bg-zinc-900/60 px-2.5 py-2 text-[10px] font-mono leading-relaxed text-zinc-400">
+                No GPU backend detected. Live CPU telemetry is shown above; GPU metrics
+                are hidden on CPU-only devices.
+              </div>
+            )}
           </div>
 
           {/* Right: Real-Time Terminal Log Viewer */}

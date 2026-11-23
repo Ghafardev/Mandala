@@ -106,12 +106,33 @@ export interface GpuTelemetry {
   hsa_node: string;
 }
 
+export interface CpuSpecs {
+  cpu_model: string;
+  physical_cores: number | null;
+  total_cores: number | null;
+  frequency_mhz: number | 'N/A';
+}
+
+export interface CpuStatus {
+  overall_utilization: number;
+  per_core_utilization: number[];
+  load_average: number[] | 'N/A';
+}
+
+export interface CpuTelemetry {
+  backend: string;
+  vendor: string;
+  specs?: CpuSpecs;
+  status?: CpuStatus;
+}
+
 export interface TelemetryPayload {
   detected: boolean;
   is_emulated: boolean;
   driver: string;
   timestamp: number;
   gpus: GpuTelemetry[];
+  cpu?: CpuTelemetry;
 }
 
 export interface ChatMessage {
