@@ -32,6 +32,15 @@ const NOT_REPORTED = 'not reported';
 const numberOrNull = (value: unknown): number | null =>
   typeof value === 'number' && Number.isFinite(value) ? value : null;
 
+/**
+ * The backend sends 0.0 for sensors it does not read. A live GPU cannot report
+ * 0 °C, 0 W or a fan at 0 rpm, so those zeros mean "not reported".
+ */
+const positiveOrNull = (value: unknown): number | null => {
+  const reading = numberOrNull(value);
+  return reading !== null && reading > 0 ? reading : null;
+};
+
 const formatNumber = (value: number | null, digits = 1): string =>
   value === null ? UNKNOWN : value.toFixed(digits);
 
@@ -83,10 +92,10 @@ export const TelemetryPanel: React.FC<TelemetryPanelProps> = ({
   const vramTotal = numberOrNull(gpu?.vram_total_gb);
   const vramPercent = numberOrNull(gpu?.vram_percent);
   const gpuUtil = numberOrNull(gpu?.gpu_utilization);
-  const tempEdge = numberOrNull(gpu?.temp_edge_c);
-  const tempJunction = numberOrNull(gpu?.temp_junction_c);
-  const powerWatts = numberOrNull(gpu?.power_watts);
-  const powerCapWatts = numberOrNull(gpu?.power_cap_watts);
+  const tempEdge = positiveOrNull(gpu?.temp_edge_c);
+  const tempJunction = positiveOrNull(gpu?.temp_junction_c);
+  const powerWatts = positiveOrNull(gpu?.power_watts);
+  const powerCapWatts = positiveOrNull(gpu?.power_cap_watts);
 
   const cpu: CpuTelemetry | undefined = telemetry?.cpu;
 
