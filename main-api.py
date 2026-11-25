@@ -27,7 +27,7 @@ from backend.copilot_agent import create_pydantic_ai_agent, fallback_copilot_dia
 from backend.routers.auth import router as auth_router
 from backend.routers.task import task_router
 from backend.database import initialize_database
-from backend.telemetry import normalize_rocm_smi_json
+from backend.telemetry import normalize_nvml_devices, normalize_rocm_smi_json
 
 
 @asynccontextmanager
@@ -123,18 +123,15 @@ def get_rocm_telemetry() -> Dict[str, Any]:
 
 
 def get_cuda_telemetry() -> Dict[str, Any]:
-    """
-    Reading telemetry CUDA from pynvml.
-    """
+    """Read NVML via pynvml and normalize it into the frontend ``gpus[]`` contract."""
     import pynvml
 
     pynvml.nvmlInit()
 
     try:
-        device_count = pynvml.nvmlDeviceGetCount()
-        cards = {}
+        devices = []
 
-        for index in range(device_count):
+        for index in range(pynvml.nvmlDeviceGetCount()):
             handle = pynvml.nvmlDeviceGetHandleByIndex(index)
 
             name = pynvml.nvmlDeviceGetName(handle)
@@ -144,43 +141,37 @@ def get_cuda_telemetry() -> Dict[str, Any]:
             memory = pynvml.nvmlDeviceGetMemoryInfo(handle)
             utilization = pynvml.nvmlDeviceGetUtilizationRates(handle)
 
-            temperature = None
+            # Sensors that are unsupported on some SKUs are simply left missing (0.0).
             try:
                 temperature = pynvml.nvmlDeviceGetTemperature(
                     handle,
                     pynvml.NVML_TEMPERATURE_GPU,
                 )
             except Exception:
-                pass
+                temperature = None
 
-            power_watts = None
             try:
-                power_mw = pynvml.nvmlDeviceGetPowerUsage(handle)
-                power_watts = round(power_mw / 1000.0, 2)
+                power_watts = pynvml.nvmlDeviceGetPowerUsage(handle) / 1000.0
             except Exception:
-                pass
+                power_watts = None
 
-            card_key = f"card{index}"
-
-            cards[card_key] = {
-                "GPU usem(%)": str(utilization.gpu),
-                "GPU Memory Use (%)": str(utilization.memory),
-                "VRAM Total Memory (B)": str(memory.total),
-                "VRAM Total Used Memory (B)": str(memory.used),
-                "VRAM Total Free Memory (B)": str(memory.free),
-                "Temperature (Sensor edge) (C)": (
-                    str(temperature) if temperature is not None else "N/A"
-                ),
-                "Power (W)": (
-                    str(power_watts) if power_watts is not None else "N/A"
-                ),
-                "GPU Name": name,
-            }
+            devices.append(
+                {
+                    "index": index,
+                    "name": name,
+                    "gpu_utilization": utilization.gpu,
+                    "memory_utilization": utilization.memory,
+                    "vram_used_bytes": memory.used,
+                    "vram_total_bytes": memory.total,
+                    "temp_edge_c": temperature,
+                    "power_watts": power_watts,
+                }
+            )
 
         return {
+            **normalize_nvml_devices(devices),
             "backend": "cuda",
             "vendor": "NVIDIA",
-            "data": cards,
         }
 
     finally:

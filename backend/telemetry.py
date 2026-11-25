@@ -20,6 +20,56 @@ class RocmSmiCommandResult:
     stderr: str = ""
 
 
+def _as_float(value: Any) -> float:
+    """Coerce a hardware reading to float; missing, ``None`` or ``"N/A"`` read as 0.0."""
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _build_gpu_record(
+    *,
+    card_id: str,
+    name: str,
+    gpu_utilization: float,
+    vram_used_bytes: float,
+    vram_total_bytes: float,
+    temp_edge_c: float = 0.0,
+    power_watts: float = 0.0,
+    memory_bandwidth_util: float = 0.0,
+) -> Dict[str, Any]:
+    """Build one ``gpus[]`` entry; shared so every vendor emits the same shape."""
+    vram_total_gb = vram_total_bytes / (1024 ** 3)
+    vram_used_gb = vram_used_bytes / (1024 ** 3)
+    vram_percent = (vram_used_gb / vram_total_gb * 100.0) if vram_total_gb > 0 else 0.0
+
+    return {
+        "id": str(card_id),
+        "name": name,
+        "arch": "",
+        "compute_units": 0,
+        "stream_processors": 0,
+        "matrix_cores": "",
+        "vram_used_gb": round(vram_used_gb, 2),
+        "vram_total_gb": round(vram_total_gb, 2),
+        "vram_percent": round(vram_percent, 1),
+        "gpu_utilization": round(gpu_utilization, 1),
+        "memory_bandwidth_util": round(memory_bandwidth_util, 1),
+        "hbm_peak_bandwidth_tbs": 0.0,
+        "temp_edge_c": round(temp_edge_c, 1),
+        "temp_junction_c": 0.0,
+        "temp_hbm_c": 0.0,
+        "power_watts": round(power_watts, 1),
+        "power_cap_watts": 0.0,
+        "fan_speed_rpm": 0,
+        "pcie_link": "",
+        "infinity_fabric_bandwidth_gbps": 0.0,
+        "status": "available",
+        "hsa_node": "",
+    }
+
+
 def normalize_rocm_smi_json(raw_json: str, timestamp: Optional[float] = None) -> Dict[str, Any]:
     """Normalize raw rocm-smi JSON into the frontend-facing telemetry shape."""
     parsed: Any
@@ -33,42 +83,16 @@ def normalize_rocm_smi_json(raw_json: str, timestamp: Optional[float] = None) ->
         for card_key, card_data in parsed.items():
             if not isinstance(card_data, dict):
                 continue
-            card_name = str(card_data.get("Card series") or card_key)
-            vram_total_bytes = float(card_data.get("VRAM Total Memory (B)", 0) or 0)
-            vram_used_bytes = float(card_data.get("VRAM Total Used Memory (B)", 0) or 0)
-            gpu_util = float(card_data.get("GPU use (%)", 0) or 0)
-            temp_edge = float(card_data.get("Temperature (Sensor edge) (C)", 0) or 0)
-            power_watts = float(card_data.get("Average Graphics Package Power (W)", 0) or 0)
-
-            vram_total_gb = vram_total_bytes / (1024 ** 3)
-            vram_used_gb = vram_used_bytes / (1024 ** 3)
-            vram_percent = (vram_used_gb / vram_total_gb * 100.0) if vram_total_gb > 0 else 0.0
-
             cards.append(
-                {
-                    "id": str(card_key),
-                    "name": card_name,
-                    "arch": "",
-                    "compute_units": 0,
-                    "stream_processors": 0,
-                    "matrix_cores": "",
-                    "vram_used_gb": round(vram_used_gb, 2),
-                    "vram_total_gb": round(vram_total_gb, 2),
-                    "vram_percent": round(vram_percent, 1),
-                    "gpu_utilization": round(gpu_util, 1),
-                    "memory_bandwidth_util": 0.0,
-                    "hbm_peak_bandwidth_tbs": 0.0,
-                    "temp_edge_c": round(temp_edge, 1),
-                    "temp_junction_c": 0.0,
-                    "temp_hbm_c": 0.0,
-                    "power_watts": round(power_watts, 1),
-                    "power_cap_watts": 0.0,
-                    "fan_speed_rpm": 0,
-                    "pcie_link": "",
-                    "infinity_fabric_bandwidth_gbps": 0.0,
-                    "status": "available",
-                    "hsa_node": "",
-                }
+                _build_gpu_record(
+                    card_id=card_key,
+                    name=str(card_data.get("Card series") or card_key),
+                    gpu_utilization=_as_float(card_data.get("GPU use (%)")),
+                    vram_used_bytes=_as_float(card_data.get("VRAM Total Used Memory (B)")),
+                    vram_total_bytes=_as_float(card_data.get("VRAM Total Memory (B)")),
+                    temp_edge_c=_as_float(card_data.get("Temperature (Sensor edge) (C)")),
+                    power_watts=_as_float(card_data.get("Average Graphics Package Power (W)")),
+                )
             )
 
     payload = {
@@ -83,6 +107,41 @@ def normalize_rocm_smi_json(raw_json: str, timestamp: Optional[float] = None) ->
     else:
         payload["status"] = "unavailable"
     return payload
+
+
+def normalize_nvml_devices(
+    devices: Optional[List[Dict[str, Any]]], timestamp: Optional[float] = None
+) -> Dict[str, Any]:
+    """Normalize pynvml device readings into the same shape as the ROCm normalizer.
+
+    ``devices`` holds one plain dict per card (``index``, ``name``, ``gpu_utilization``,
+    ``memory_utilization``, ``vram_used_bytes``, ``vram_total_bytes``, ``temp_edge_c``,
+    ``power_watts``). Readings the driver refused to report may be ``None``.
+    """
+    cards: List[Dict[str, Any]] = []
+    for position, device in enumerate(devices or []):
+        card_id = device.get("index", position)
+        cards.append(
+            _build_gpu_record(
+                card_id=f"card{card_id}",
+                name=str(device.get("name") or f"NVIDIA GPU {card_id}"),
+                gpu_utilization=_as_float(device.get("gpu_utilization")),
+                vram_used_bytes=_as_float(device.get("vram_used_bytes")),
+                vram_total_bytes=_as_float(device.get("vram_total_bytes")),
+                temp_edge_c=_as_float(device.get("temp_edge_c")),
+                power_watts=_as_float(device.get("power_watts")),
+                memory_bandwidth_util=_as_float(device.get("memory_utilization")),
+            )
+        )
+
+    return {
+        "detected": bool(cards),
+        "is_emulated": False,
+        "driver": "CUDA NVML",
+        "timestamp": timestamp if timestamp is not None else time.time(),
+        "gpus": cards,
+        "status": "available" if cards else "unavailable",
+    }
 
 
 class TelemetryProvider:

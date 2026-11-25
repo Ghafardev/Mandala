@@ -5,6 +5,7 @@ from __future__ import annotations
 from backend.telemetry import (
     RocmSmiCommandResult,
     TelemetryProvider,
+    normalize_nvml_devices,
     normalize_rocm_smi_json,
 )
 
@@ -98,3 +99,73 @@ def test_normalize_rocm_smi_json_uses_only_reported_values() -> None:
             "hsa_node": "",
         }
     ]
+
+
+def test_normalize_nvml_devices_maps_pynvml_readings_into_the_gpus_contract() -> None:
+    # Given: two NVML devices, the second with sensors the driver did not report
+    devices = [
+        {
+            "index": 0,
+            "name": "NVIDIA H100 80GB HBM3",
+            "gpu_utilization": 87,
+            "memory_utilization": 42,
+            "vram_total_bytes": 85899345920,
+            "vram_used_bytes": 42949672960,
+            "temp_edge_c": 58,
+            "power_watts": 312.5,
+        },
+        {
+            "index": 1,
+            "name": "NVIDIA H100 80GB HBM3",
+            "gpu_utilization": None,
+            "memory_utilization": None,
+            "vram_total_bytes": 85899345920,
+            "vram_used_bytes": 0,
+            "temp_edge_c": None,
+            "power_watts": None,
+        },
+    ]
+
+    # When: the CUDA readings are normalized
+    payload = normalize_nvml_devices(devices, timestamp=456.0)
+
+    # Then: both cards land in the same gpus[] shape the ROCm path emits
+    assert payload["detected"] is True
+    assert payload["is_emulated"] is False
+    assert payload["driver"] == "CUDA NVML"
+    assert payload["timestamp"] == 456.0
+    assert payload["status"] == "available"
+    assert len(payload["gpus"]) == 2
+
+    rocm_keys = set(normalize_rocm_smi_json('{"card0": {"GPU use (%)": "1"}}')["gpus"][0])
+
+    first = payload["gpus"][0]
+    assert set(first) == rocm_keys
+    assert first["id"] == "card0"
+    assert first["name"] == "NVIDIA H100 80GB HBM3"
+    assert first["gpu_utilization"] == 87.0
+    assert first["memory_bandwidth_util"] == 42.0
+    assert first["vram_total_gb"] == 80.0
+    assert first["vram_used_gb"] == 40.0
+    assert first["vram_percent"] == 50.0
+    assert first["temp_edge_c"] == 58.0
+    assert first["power_watts"] == 312.5
+
+    # Missing sensor readings degrade to zeros instead of breaking the frame
+    second = payload["gpus"][1]
+    assert second["id"] == "card1"
+    assert second["gpu_utilization"] == 0.0
+    assert second["vram_used_gb"] == 0.0
+    assert second["vram_percent"] == 0.0
+    assert second["temp_edge_c"] == 0.0
+    assert second["power_watts"] == 0.0
+
+
+def test_normalize_nvml_devices_without_devices_reports_unavailable() -> None:
+    # Given/When: NVML reports no devices
+    payload = normalize_nvml_devices([])
+
+    # Then: the same explicit empty state as the ROCm path
+    assert payload["detected"] is False
+    assert payload["gpus"] == []
+    assert payload["status"] == "unavailable"
