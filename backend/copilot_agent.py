@@ -4,22 +4,17 @@ Implements Pydantic AI Agent configured for AMD ROCm, Triton kernel engineering,
 and HSA/HIP architecture debugging. Connects to local Ollama (qwen3.5:b) via OpenAIProvider,
 with structured tool outputs for kernel diagnostics, block/grid tuning, and MFMA scheduling.
 """
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, Optional
 from pydantic import BaseModel, Field
 
 try:
     from pydantic_ai import Agent, RunContext
-
-    # Pydantic AI V2 removed ``OpenAIModel`` in favour of ``OpenAIChatModel``.
-    try:
-        from pydantic_ai.models.openai import OpenAIChatModel as OpenAICompatModel
-    except ImportError:  # pydantic-ai < 1.0
-        from pydantic_ai.models.openai import OpenAIModel as OpenAICompatModel
-
-    from openai import AsyncOpenAI
+    from pydantic_ai.models.openai import OpenAIChatModel
+    from pydantic_ai.providers.openai import OpenAIProvider
 
     PYDANTIC_AI_AVAILABLE = True
 except ImportError:
+    # The API still serves the rule-engine fallback without pydantic-ai installed.
     PYDANTIC_AI_AVAILABLE = False
 
 
@@ -52,35 +47,15 @@ def create_pydantic_ai_agent():
     if not PYDANTIC_AI_AVAILABLE:
         return None
 
-    # Connect to local Ollama instance hosting qwen3.5:b
-    custom_client = AsyncOpenAI(
-        base_url="http://localhost:11434/v1",
-        api_key="ollama"
-    )
-    try:
-        # Pydantic AI V1+ takes a provider instead of a raw client.
-        from pydantic_ai.providers.openai import OpenAIProvider
-
-        ollama_model = OpenAICompatModel(
+    agent = Agent(
+        # Local Ollama instance hosting qwen3.5:b
+        OpenAIChatModel(
             "qwen3.5:b",
             provider=OpenAIProvider(base_url="http://localhost:11434/v1", api_key="ollama"),
-        )
-    except (ImportError, TypeError):  # pydantic-ai < 1.0
-        ollama_model = OpenAICompatModel("qwen3.5:b", openai_client=custom_client)
-
-    # ``result_type`` became ``output_type`` in Pydantic AI V1.
-    try:
-        agent = Agent(
-            ollama_model,
-            output_type=KernelOptimizationResult,
-            system_prompt=SYSTEM_PROMPT,
-        )
-    except TypeError:  # pydantic-ai < 1.0
-        agent = Agent(
-            ollama_model,
-            result_type=KernelOptimizationResult,
-            system_prompt=SYSTEM_PROMPT,
-        )
+        ),
+        output_type=KernelOptimizationResult,
+        system_prompt=SYSTEM_PROMPT,
+    )
 
     @agent.tool
     async def analyze_lds_bank_conflicts(
