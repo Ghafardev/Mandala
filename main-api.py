@@ -187,25 +187,28 @@ def get_cuda_telemetry() -> Dict[str, Any]:
         pynvml.nvmlShutdown()
 
 def get_gpu_telemetry_universal() -> Dict[str, Any]:
-     #ROCm
-     try:
-         return get_rocm_telemetry()
-     except Exception as rocm_error:
-         rocm_message = str(rocm_error)
+    # AMD ROCm
+    try:
+        return get_rocm_telemetry()
+    except Exception as rocm_error:
+        rocm_message = str(rocm_error)
 
-     #NVIDIA CUDA
-     try:
-         return get_cuda_telemetry()
-     except Exception as cuda_error:
-         cuda_message = str(cuda_error)
+    # NVIDIA CUDA
+    try:
+        return get_cuda_telemetry()
+    except Exception as cuda_error:
+        cuda_message = str(cuda_error)
 
-     #fallback
-     return {
-         "backend": "none",
-         "vendor": "unknown",
-         "status": "error",
-         "message": "GPU Backend isn't found",
-         "errors": {
+    # CPU-only fallback: keep the frontend contract (``gpus`` is always a list).
+    return {
+        "backend": "none",
+        "vendor": "unknown",
+        "detected": False,
+        "driver": "unavailable",
+        "gpus": [],
+        "status": "unavailable",
+        "message": "GPU Backend isn't found",
+        "errors": {
               "rocm": rocm_message,
               "cuda": cuda_message,
         },
@@ -343,10 +346,15 @@ async def copilot_chat(request: CopilotChatRequest):
         try:
             result = await copilot_agent.run(agent_prompt)
 
+            # Pydantic AI V2 exposes ``output``; older releases used ``data``.
+            output = getattr(result, "output", None)
+            if output is None:
+                output = result.data
+
             diagnosis = (
-                result.data.model_dump()
-                if hasattr(result.data, "model_dump")
-                else result.data.dict()
+                output.model_dump()
+                if hasattr(output, "model_dump")
+                else output.dict()
             )
 
             return {
@@ -355,8 +363,8 @@ async def copilot_chat(request: CopilotChatRequest):
             }
         
         except Exception as err:
-            # Fallback gracefully
-            pass
+            # Fallback gracefully, but leave a trace of why the model was skipped.
+            print(f"Copilot agent unavailable, using rule engine: {err}")
 
     fallback_data = fallback_copilot_diagnosis(user_query, current_kernel)
     return {
@@ -367,4 +375,8 @@ async def copilot_chat(request: CopilotChatRequest):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("MANDALA_PORT", "8000")))
+    uvicorn.run(
+        app,
+        host=os.getenv("MANDALA_HOST", "127.0.0.1"),
+        port=int(os.getenv("MANDALA_PORT", "8000")),
+    )

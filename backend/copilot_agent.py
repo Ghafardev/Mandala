@@ -9,8 +9,15 @@ from pydantic import BaseModel, Field
 
 try:
     from pydantic_ai import Agent, RunContext
-    from pydantic_ai.models.openai import OpenAIModel
+
+    # Pydantic AI V2 removed ``OpenAIModel`` in favour of ``OpenAIChatModel``.
+    try:
+        from pydantic_ai.models.openai import OpenAIChatModel as OpenAICompatModel
+    except ImportError:  # pydantic-ai < 1.0
+        from pydantic_ai.models.openai import OpenAIModel as OpenAICompatModel
+
     from openai import AsyncOpenAI
+
     PYDANTIC_AI_AVAILABLE = True
 except ImportError:
     PYDANTIC_AI_AVAILABLE = False
@@ -50,13 +57,30 @@ def create_pydantic_ai_agent():
         base_url="http://localhost:11434/v1",
         api_key="ollama"
     )
-    ollama_model = OpenAIModel("qwen3.5:b", openai_client=custom_client)
-    
-    agent = Agent(
-        ollama_model,
-        result_type=KernelOptimizationResult,
-        system_prompt=SYSTEM_PROMPT
-    )
+    try:
+        # Pydantic AI V1+ takes a provider instead of a raw client.
+        from pydantic_ai.providers.openai import OpenAIProvider
+
+        ollama_model = OpenAICompatModel(
+            "qwen3.5:b",
+            provider=OpenAIProvider(base_url="http://localhost:11434/v1", api_key="ollama"),
+        )
+    except (ImportError, TypeError):  # pydantic-ai < 1.0
+        ollama_model = OpenAICompatModel("qwen3.5:b", openai_client=custom_client)
+
+    # ``result_type`` became ``output_type`` in Pydantic AI V1.
+    try:
+        agent = Agent(
+            ollama_model,
+            output_type=KernelOptimizationResult,
+            system_prompt=SYSTEM_PROMPT,
+        )
+    except TypeError:  # pydantic-ai < 1.0
+        agent = Agent(
+            ollama_model,
+            result_type=KernelOptimizationResult,
+            system_prompt=SYSTEM_PROMPT,
+        )
 
     @agent.tool
     async def analyze_lds_bank_conflicts(
