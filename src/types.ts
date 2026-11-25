@@ -127,6 +127,7 @@ export interface CpuTelemetry {
 export interface TelemetryPayload {
   detected: boolean;
   is_emulated: boolean;
+  backend?: 'rocm' | 'cuda' | 'none';
   driver: string;
   timestamp: number;
   gpus: GpuTelemetry[];

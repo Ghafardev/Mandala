@@ -6,6 +6,7 @@ import { CopilotSidebar } from './components/CopilotSidebar';
 import { Mandala3DGraphView } from './components/mandala3d/Mandala3DGraphView';
 import { EnvironmentStatusBanner } from './components/EnvironmentStatusBanner';
 import { createTelemetryWebSocket, fetchRuntimeCapability, type RuntimeCapabilityState } from './lib/api';
+import type { TelemetryPayload } from './types';
 
 export default function App() {
   const [activeView, setActiveView] = useState<'workflow' | '3d-mandala'>('workflow');
@@ -14,7 +15,11 @@ export default function App() {
   const [isTelemetryOpen, setIsTelemetryOpen] = useState(true);
   const [externalPrompt, setExternalPrompt] = useState<string | null>(null);
   const [runtimeCapability, setRuntimeCapability] = useState<RuntimeCapabilityState | null>(null);
-  const [gpuTelemetry, setGpuTelemetry] = useState<any>(null);
+  const [gpuTelemetry, setGpuTelemetry] = useState<TelemetryPayload | null>(null);
+  const [telemetryStatus, setTelemetryStatus] = useState<
+    'connected' | 'connecting' | 'disconnected'
+  >('connecting');
+  const [telemetryUrl, setTelemetryUrl] = useState<string>('');
 
   const [logs, setLogs] = useState<string[]>([
     `[SYS-INIT] Mandala Low-Code ROCm Studio booting.`,
@@ -57,7 +62,10 @@ export default function App() {
   useEffect(() => {
     const cleanup = createTelemetryWebSocket(
       (data) => setGpuTelemetry(data),
-      () => undefined
+      (status, url) => {
+        setTelemetryStatus(status);
+        setTelemetryUrl(url);
+      }
     );
     return cleanup;
   }, []);
@@ -96,6 +104,9 @@ export default function App() {
               <TelemetryPanel
                 logs={logs}
                 onClearLogs={handleClearLogs}
+                telemetry={gpuTelemetry}
+                connectionStatus={telemetryStatus}
+                connectedUrl={telemetryUrl}
               />
             )}
           </div>

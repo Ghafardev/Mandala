@@ -5,92 +5,90 @@ import {
   Flame,
   Zap,
   Terminal,
-  Wifi,
-  WifiOff,
   Trash2,
-  Copy,
   ChevronDown,
   ChevronUp,
-  Maximize2,
   Cpu,
   AlertTriangle,
 } from 'lucide-react';
-import { createTelemetryWebSocket } from '../lib/api';
-import type { CpuTelemetry } from '../types';
+import type { CpuTelemetry, GpuTelemetry, TelemetryPayload } from '../types';
+
+export type TelemetryConnectionStatus = 'connected' | 'connecting' | 'disconnected';
 
 export interface TelemetryPanelProps {
   logs?: string[];
   onClearLogs?: () => void;
   className?: string;
+  /** Frame broadcast by the single telemetry subscription owned by App.tsx. */
+  telemetry?: TelemetryPayload | null;
+  connectionStatus?: TelemetryConnectionStatus;
+  connectedUrl?: string;
 }
+
+const UNKNOWN = '—';
+const NOT_REPORTED = 'not reported';
+
+/** A reading is only usable when it is an actual finite number. */
+const numberOrNull = (value: unknown): number | null =>
+  typeof value === 'number' && Number.isFinite(value) ? value : null;
+
+const formatNumber = (value: number | null, digits = 1): string =>
+  value === null ? UNKNOWN : value.toFixed(digits);
+
+const vramLabel = (
+  used: number | null,
+  total: number | null,
+  percent: number | null
+): string => {
+  if (used === null && total === null) return NOT_REPORTED;
+  const amounts = `${formatNumber(used)} / ${formatNumber(total)} GB`;
+  return percent === null ? amounts : `${amounts} (${percent.toFixed(1)}%)`;
+};
+
+const getTempColor = (c: number | null) => {
+  if (c === null) return { text: 'text-zinc-400', bar: 'bg-zinc-700' };
+  if (c < 70)
+    return { text: 'text-[#FB8500]', bar: 'bg-gradient-to-r from-[#FB8500] to-[#FF8C00]' };
+  if (c < 85)
+    return { text: 'text-orange-400', bar: 'bg-gradient-to-r from-[#FF8C00] to-orange-500' };
+  return { text: 'text-[#E63946]', bar: 'bg-gradient-to-r from-[#FB8500] to-[#E63946]' };
+};
+
+// Per-core color ramp for the CPU core grid (gold -> orange -> red)
+const getCoreColor = (value: number) => {
+  if (value >= 85) return 'bg-[#E63946]';
+  if (value >= 50) return 'bg-[#FB8500]';
+  if (value >= 15) return 'bg-[#FFD700]';
+  return 'bg-zinc-700';
+};
 
 export const TelemetryPanel: React.FC<TelemetryPanelProps> = ({
   logs = [],
   onClearLogs,
   className = '',
+  telemetry = null,
+  connectionStatus = 'disconnected',
+  connectedUrl = '',
 }) => {
-  const [telemetry, setTelemetry] = useState<any>({
-    gpu_utilization: 0,
-    vram_used_gb: 0,
-    vram_total_gb: 0,
-    vram_percent: 0,
-    temp_edge_c: 0,
-    temp_junction_c: 0,
-    power_watts: 0,
-    power_cap_watts: 0,
-    driver: 'waiting for backend',
-    name: 'Waiting for live GPU telemetry',
-  });
-
-  const [cpu, setCpu] = useState<CpuTelemetry | null>(null);
-  const [gpuAvailable, setGpuAvailable] = useState<boolean>(false);
-  const [connectionStatus, setConnectionStatus] = useState<
-    'connected' | 'connecting' | 'disconnected'
-  >('connecting');
-  const [connectedUrl, setConnectedUrl] = useState<string>(
-    'ws://localhost:8000/ws/gpu-telemetry'
-  );
   const [isAutoScroll, setIsAutoScroll] = useState<boolean>(true);
   const [isExpanded, setIsExpanded] = useState<boolean>(true);
   const logContainerRef = useRef<HTMLDivElement>(null);
 
-  // Connect to ws://localhost:8000/ws/gpu-telemetry
-  useEffect(() => {
-    const cleanup = createTelemetryWebSocket(
-      (data) => {
-        if (data?.cpu) {
-          setCpu(data.cpu);
-        }
+  const gpu: GpuTelemetry | null = telemetry?.gpus?.[0] ?? null;
+  const gpuAvailable = gpu !== null;
+  const gpuBackendReported =
+    telemetry?.backend === 'rocm' || telemetry?.backend === 'cuda';
 
-        const hasGpuDevices = Array.isArray(data?.gpus) && data.gpus.length > 0;
-        setGpuAvailable(
-          hasGpuDevices || data?.backend === 'rocm' || data?.backend === 'cuda'
-        );
+  const vramUsed = numberOrNull(gpu?.vram_used_gb);
+  const vramTotal = numberOrNull(gpu?.vram_total_gb);
+  const vramPercent = numberOrNull(gpu?.vram_percent);
+  const gpuUtil = numberOrNull(gpu?.gpu_utilization);
+  const tempEdge = numberOrNull(gpu?.temp_edge_c);
+  const tempJunction = numberOrNull(gpu?.temp_junction_c);
+  const powerWatts = numberOrNull(gpu?.power_watts);
+  const powerCapWatts = numberOrNull(gpu?.power_cap_watts);
 
-        if (hasGpuDevices) {
-          const primaryGpu = data.gpus[0];
-          setTelemetry({
-            gpu_utilization: primaryGpu.gpu_utilization ?? 0,
-            vram_used_gb: primaryGpu.vram_used_gb ?? 0,
-            vram_total_gb: primaryGpu.vram_total_gb ?? 192.0,
-            vram_percent: primaryGpu.vram_percent ?? 0,
-            temp_edge_c: primaryGpu.temp_edge_c ?? 45,
-            temp_junction_c: primaryGpu.temp_junction_c ?? 58,
-            power_watts: primaryGpu.power_watts ?? 250,
-            power_cap_watts: primaryGpu.power_cap_watts ?? 750,
-            driver: data.driver || 'ROCm 6.2.1',
-            name: primaryGpu.name || 'AMD Instinct MI300X',
-          });
-        }
-      },
-      (status, url) => {
-        setConnectionStatus(status);
-        setConnectedUrl(url);
-      }
-    );
-
-    return cleanup;
-  }, []);
+  const cpu: CpuTelemetry | undefined = telemetry?.cpu;
 
   // Auto-scroll terminal log viewer
   useEffect(() => {
@@ -99,32 +97,19 @@ export const TelemetryPanel: React.FC<TelemetryPanelProps> = ({
     }
   }, [logs, isAutoScroll]);
 
-  // Temperature color ramp helper (Mandala Energetic Orange & Crimson Red palette)
-  const getTempColor = (c: number) => {
-    if (c < 70) return { text: 'text-[#FB8500]', bar: 'bg-gradient-to-r from-[#FB8500] to-[#FF8C00]' };
-    if (c < 85) return { text: 'text-orange-400', bar: 'bg-gradient-to-r from-[#FF8C00] to-orange-500' };
-    return { text: 'text-[#E63946]', bar: 'bg-gradient-to-r from-[#FB8500] to-[#E63946]' };
-  };
-
-  // Per-core color ramp for the CPU core grid (gold -> orange -> red)
-  const getCoreColor = (value: number) => {
-    if (value >= 85) return 'bg-[#E63946]';
-    if (value >= 50) return 'bg-[#FB8500]';
-    if (value >= 15) return 'bg-[#FFD700]';
-    return 'bg-zinc-700';
-  };
-
-  const tempColor = getTempColor(telemetry.temp_edge_c);
+  const tempColor = getTempColor(tempEdge);
   const cpuSpecs = cpu?.specs;
   const perCore = cpu?.status?.per_core_utilization ?? [];
   const cpuOverall = cpu?.status?.overall_utilization ?? 0;
   const loadAverage = cpu?.status?.load_average;
   const maxCore = perCore.length > 0 ? Math.max(...perCore) : 0;
 
+  const liveHost = connectedUrl.replace(/^wss?:\/\//, '').split('/')[0];
+
   // Bottleneck detection comparing CPU pressure against GPU demand
-  const bottleneck = !gpuAvailable
+  const bottleneck = !gpuAvailable || gpuUtil === null
     ? null
-    : cpuOverall >= 85 && telemetry.gpu_utilization < 40
+    : cpuOverall >= 85 && gpuUtil < 40
       ? 'CPU Bottleneck Detected: data loading is slowing down training.'
       : maxCore >= 85 && cpuOverall < 50
         ? 'Single-core bottleneck: one thread is saturated while the rest idle.'
@@ -151,7 +136,9 @@ export const TelemetryPanel: React.FC<TelemetryPanelProps> = ({
             {connectionStatus === 'connected' ? (
               <>
                 <span className="h-2 w-2 rounded-full bg-[#FFD700] shadow-sm shadow-[#FFD700]/50 animate-pulse"></span>
-                <span className="text-[#FFD700] font-medium">ws://localhost:8000 [LIVE]</span>
+                <span className="text-[#FFD700] font-medium" title={connectedUrl}>
+                  {liveHost ? `${liveHost} [LIVE]` : 'telemetry [LIVE]'}
+                </span>
               </>
             ) : connectionStatus === 'connecting' ? (
               <>
@@ -167,7 +154,7 @@ export const TelemetryPanel: React.FC<TelemetryPanelProps> = ({
           </div>
 
           <span className="hidden md:inline text-[11px] font-mono text-zinc-400">
-            {gpuAvailable ? telemetry.name : 'CPU-only host'}
+            {gpuAvailable ? gpu?.name || 'GPU (name not reported)' : 'CPU-only host'}
           </span>
         </div>
 
@@ -279,13 +266,13 @@ export const TelemetryPanel: React.FC<TelemetryPanelProps> = ({
                   VRAM Usage
                 </span>
                 <span className="font-mono text-[11px] text-[#FFD700] font-semibold">
-                  {telemetry.vram_used_gb.toFixed(1)} / {telemetry.vram_total_gb} GB ({telemetry.vram_percent.toFixed(1)}%)
+                  {vramLabel(vramUsed, vramTotal, vramPercent)}
                 </span>
               </div>
               <div className="h-2 w-full overflow-hidden rounded-full bg-zinc-900 border border-zinc-800 hover:border-[#FB8500]/40 transition-colors">
                 <div
                   className="h-full bg-gradient-to-r from-[#FFB703] to-[#FFD700] transition-all duration-300 ease-out shadow-sm shadow-amber-500/20"
-                  style={{ width: `${Math.min(100, telemetry.vram_percent)}%` }}
+                  style={{ width: `${Math.min(100, vramPercent ?? 0)}%` }}
                 />
               </div>
             </div>
@@ -297,10 +284,13 @@ export const TelemetryPanel: React.FC<TelemetryPanelProps> = ({
                   <Flame className={`h-3.5 w-3.5 ${tempColor.text}`} />
                   GPU Temperature
                 </span>
-                <span className={`font-mono text-[11px] font-semibold ${tempColor.text}`}>
-                  {telemetry.temp_edge_c.toFixed(1)}°C{' '}
+                <span
+                  className={`font-mono text-[11px] font-semibold ${tempColor.text}`}
+                  title={tempEdge === null ? 'Not reported by this backend' : undefined}
+                >
+                  {tempEdge === null ? UNKNOWN : `${tempEdge.toFixed(1)}°C`}{' '}
                   <span className="text-[10px] text-zinc-400">
-                    (Jct: {telemetry.temp_junction_c.toFixed(1)}°C)
+                    (Jct: {tempJunction === null ? UNKNOWN : `${tempJunction.toFixed(1)}°C`})
                   </span>
                 </span>
               </div>
@@ -308,7 +298,7 @@ export const TelemetryPanel: React.FC<TelemetryPanelProps> = ({
                 <div
                   className={`h-full ${tempColor.bar} transition-all duration-300 ease-out shadow-sm shadow-orange-500/20`}
                   style={{
-                    width: `${Math.min(100, (telemetry.temp_edge_c / 105) * 100)}%`,
+                    width: `${Math.min(100, ((tempEdge ?? 0) / 105) * 100)}%`,
                   }}
                 />
               </div>
@@ -322,20 +312,23 @@ export const TelemetryPanel: React.FC<TelemetryPanelProps> = ({
                   Compute Utilization
                 </span>
                 <div className="flex items-center gap-1.5">
-                  {telemetry.gpu_utilization >= 75 && (
+                  {gpuUtil !== null && gpuUtil >= 75 && (
                     <span className="rounded bg-[#E63946]/20 border border-[#E63946]/50 px-1 py-0.2 text-[9px] font-mono font-bold text-[#E63946] animate-pulse">
                       HIGH LOAD
                     </span>
                   )}
-                  <span className="font-mono text-[11px] text-[#E63946] font-semibold">
-                    {telemetry.gpu_utilization.toFixed(1)}%
+                  <span
+                    className="font-mono text-[11px] text-[#E63946] font-semibold"
+                    title={gpuUtil === null ? 'Not reported by this backend' : undefined}
+                  >
+                    {gpuUtil === null ? UNKNOWN : `${gpuUtil.toFixed(1)}%`}
                   </span>
                 </div>
               </div>
               <div className="h-2 w-full overflow-hidden rounded-full bg-zinc-900 border border-zinc-800 hover:border-[#E63946]/40 transition-colors">
                 <div
                   className="h-full bg-gradient-to-r from-[#FB8500] via-[#FF5400] to-[#E63946] transition-all duration-300 ease-out shadow-sm shadow-rose-500/20"
-                  style={{ width: `${Math.min(100, telemetry.gpu_utilization)}%` }}
+                  style={{ width: `${Math.min(100, gpuUtil ?? 0)}%` }}
                 />
               </div>
             </div>
@@ -346,14 +339,24 @@ export const TelemetryPanel: React.FC<TelemetryPanelProps> = ({
                 <Zap className="h-3 w-3 text-[#FFD700]" />
                 Package Power:
               </span>
-              <span className="text-[#FFB703] font-medium">
-                {telemetry.power_watts.toFixed(0)}W / {telemetry.power_cap_watts}W
+              <span
+                className="text-[#FFB703] font-medium"
+                title={
+                  powerWatts === null || powerCapWatts === null
+                    ? 'Not reported by this backend'
+                    : undefined
+                }
+              >
+                {powerWatts === null ? UNKNOWN : `${powerWatts.toFixed(0)}W`} /{' '}
+                {powerCapWatts === null ? UNKNOWN : `${powerCapWatts.toFixed(0)}W`}
               </span>
             </div>
               </>
             ) : (
               <div className="rounded border border-zinc-800 bg-zinc-900/60 px-2.5 py-2 text-[10px] font-mono leading-relaxed text-zinc-400">
-                No GPU backend detected — live CPU telemetry only.
+                {gpuBackendReported
+                  ? `GPU backend reported (${telemetry?.backend}) but no device readings arrived — showing CPU telemetry only.`
+                  : 'No GPU backend detected — live CPU telemetry only.'}
               </div>
             )}
           </div>
