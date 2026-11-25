@@ -27,6 +27,7 @@ from backend.copilot_agent import create_pydantic_ai_agent, fallback_copilot_dia
 from backend.routers.auth import router as auth_router
 from backend.routers.task import task_router
 from backend.database import initialize_database
+from backend.telemetry import normalize_rocm_smi_json
 
 
 @asynccontextmanager
@@ -43,10 +44,11 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Enable CORS for local Next.js / Vite client
+# Enable CORS for the local Vite client. Credentialed requests (the session cookie)
+# require an explicit origin; the wildcard "*" is rejected by browsers.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origin_regex=r"http://(localhost|127\.0\.0\.1)(:\d+)?",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -96,7 +98,7 @@ def get_cpu_telemetry() -> Dict[str, Any]:
 
 
 def get_rocm_telemetry() -> Dict[str, Any]:
-
+    """Read rocm-smi and normalize it into the frontend ``gpus[]`` contract."""
     result = subprocess.run(
         [
             "rocm-smi",
@@ -104,6 +106,7 @@ def get_rocm_telemetry() -> Dict[str, Any]:
             "--showmeminfo",
             "vram",
             "--showtemp",
+            "--showpower",
             "--json",
         ],
         capture_output=True,
@@ -111,12 +114,11 @@ def get_rocm_telemetry() -> Dict[str, Any]:
         check=True,
         timeout=5,
     )
-    data = json.loads(result.stdout)
 
     return {
+        **normalize_rocm_smi_json(result.stdout),
         "backend": "rocm",
         "vendor": "AMD",
-        "data": data,
     }
 
 
@@ -303,16 +305,43 @@ async def compile_and_run(request_data: dict):
         raise HTTPException(status_code=500, detail=f"Kernel compilation failed: {exc}") from exc
 
 
+def build_copilot_prompt(
+    message: str,
+    conversation_history: Optional[list],
+    current_kernel_context: Optional[Dict[str, Any]],
+) -> str:
+    """Fold every declared request field into the single prompt the agent receives."""
+    sections: list = []
+
+    if current_kernel_context:
+        sections.append(
+            f"[Active kernel in GUI] {json.dumps(current_kernel_context, sort_keys=True, default=str)}"
+        )
+
+    for item in (conversation_history or [])[-6:]:
+        if not isinstance(item, dict):
+            continue
+        content = item.get("content") or item.get("text")
+        if content:
+            sections.append(f"{item.get('role', 'user')}: {content}")
+
+    sections.append(f"user: {message}")
+    return "\n\n".join(sections)
+
+
 @app.post("/api/v1/copilot/chat")
 async def copilot_chat(request: CopilotChatRequest):
     """Pydantic AI agent for diagnosing kernel errors and suggesting block/grid sizes."""
     user_query = request.message
     current_kernel = request.current_kernel_context
+    agent_prompt = build_copilot_prompt(
+        user_query, request.conversation_history, current_kernel
+    )
 
     # Try Pydantic AI agent connected to local Ollama (qwen3.5:b)
     if copilot_agent:
         try:
-            result = await copilot_agent.run(user_query)
+            result = await copilot_agent.run(agent_prompt)
 
             diagnosis = (
                 result.data.model_dump()

@@ -31,6 +31,48 @@ interface Message {
   model?: string;
 }
 
+interface CopilotDiagnosis {
+  summary?: string;
+  suggested_block_m?: number;
+  suggested_block_n?: number;
+  suggested_block_k?: number;
+  suggested_warps?: number;
+  suggested_stages?: number;
+  root_cause_diagnosis?: string | null;
+  repaired_kernel_code?: string | null;
+}
+
+/** Renders the backend `{ source, diagnosis }` contract as markdown for the chat bubble. */
+function formatDiagnosis(payload: any): string {
+  const diagnosis: CopilotDiagnosis | undefined = payload?.diagnosis;
+  if (!diagnosis) {
+    return payload?.response || payload?.message || 'Copilot returned an empty diagnosis.';
+  }
+
+  const sections: string[] = [`### ${diagnosis.summary || 'Kernel diagnosis'}`];
+
+  const tuning: string[] = [];
+  if (diagnosis.suggested_block_m != null) tuning.push(`- \`BLOCK_SIZE_M = ${diagnosis.suggested_block_m}\``);
+  if (diagnosis.suggested_block_n != null) tuning.push(`- \`BLOCK_SIZE_N = ${diagnosis.suggested_block_n}\``);
+  if (diagnosis.suggested_block_k != null) tuning.push(`- \`BLOCK_SIZE_K = ${diagnosis.suggested_block_k}\``);
+  if (diagnosis.suggested_warps != null) tuning.push(`- \`num_warps = ${diagnosis.suggested_warps}\``);
+  if (diagnosis.suggested_stages != null) tuning.push(`- \`num_stages = ${diagnosis.suggested_stages}\``);
+  if (tuning.length > 0) sections.push(['**Suggested configuration**', ...tuning].join('\n'));
+
+  if (diagnosis.root_cause_diagnosis) {
+    sections.push(`**Root cause**\n${diagnosis.root_cause_diagnosis}`);
+  }
+
+  if (diagnosis.repaired_kernel_code) {
+    sections.push(
+      ['**Repaired kernel**', '```python', diagnosis.repaired_kernel_code.trim(), '```'].join('\n')
+    );
+  }
+
+  sections.push(`_source: ${payload?.source || 'mandala-copilot'}_`);
+  return sections.join('\n\n');
+}
+
 export const CopilotSidebar: React.FC<CopilotSidebarProps> = ({
   isOpen,
   onClose,
@@ -89,16 +131,20 @@ I can assist you with:
       // Connect to http://localhost:8000/api/v1/copilot/chat (with fallback)
       const response = await fetchWithBackendFallback('/api/v1/copilot/chat', {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           message: text,
-          model: 'Qwen 3.5 (Local)',
-          history: messages.map((m) => ({ role: m.role, text: m.content })),
+          conversation_history: messages.map((m) => ({ role: m.role, content: m.content })),
         }),
       });
 
+      if (!response.ok) {
+        throw new Error(`Copilot request failed (HTTP ${response.status})`);
+      }
+
       const data = await response.json();
-      const replyContent = data.response || 'Kernel analysis completed.';
+      const replyContent = formatDiagnosis(data);
 
       const botMsg: Message = {
         id: `bot-${Date.now()}`,
@@ -115,7 +161,7 @@ I can assist you with:
         {
           id: `err-${Date.now()}`,
           role: 'assistant',
-          content: `Unable to connect to Copilot at http://localhost:8000/api/v1/copilot/chat: ${err.message}. Ensure backend is running.`,
+          content: `Unable to reach the Mandala Copilot API (http://localhost:8000/api/v1/copilot/chat): ${err.message}. Ensure main-api.py is running.`,
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
           model: 'Qwen 3.5 (Local)',
         },
