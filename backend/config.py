@@ -20,7 +20,6 @@ DEFAULT_COPILOT_MODEL = "qwen3.5:b"
 DEFAULT_OLLAMA_URL = "http://localhost:11434/v1"
 DEFAULT_TELEMETRY_INTERVAL_SECONDS = 1.0
 MIN_TELEMETRY_INTERVAL_SECONDS = 0.05
-DEFAULT_API_URL = "http://127.0.0.1:8000"
 DEFAULT_COOKIE_SECURE = False
 
 _TRUE_VALUES = frozenset({"1", "true", "yes", "on"})
@@ -73,11 +72,6 @@ def telemetry_interval_seconds() -> float:
     except ValueError:
         return DEFAULT_TELEMETRY_INTERVAL_SECONDS
     return max(MIN_TELEMETRY_INTERVAL_SECONDS, interval)
-
-
-def api_url() -> str:
-    """Origin the UI proxy (``server.ts``) forwards ``/api`` and ``/ws`` traffic to."""
-    return _raw("MANDALA_API_URL", DEFAULT_API_URL).rstrip("/")
 
 
 def cookie_secure() -> bool:

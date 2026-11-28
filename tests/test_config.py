@@ -7,17 +7,20 @@ import pytest
 
 from backend import config
 
+# Settings this module reads.
 ENV_NAMES = (
     "MANDALA_COPILOT_MODEL",
     "MANDALA_OLLAMA_URL",
     "MANDALA_TELEMETRY_INTERVAL",
-    "MANDALA_API_URL",
     "MANDALA_COOKIE_SECURE",
 )
 
+# Documented in .env.example but consumed by the Node UI proxy (server.ts), not by Python.
+PROXY_ENV_NAMES = ("MANDALA_API_URL",)
+
 
 def _clear_environment(monkeypatch: pytest.MonkeyPatch) -> None:
-    for name in ENV_NAMES:
+    for name in ENV_NAMES + PROXY_ENV_NAMES:
         monkeypatch.delenv(name, raising=False)
 
 
@@ -29,7 +32,6 @@ def test_defaults_when_nothing_is_configured(monkeypatch: pytest.MonkeyPatch) ->
     assert config.copilot_model() == "qwen3.5:b"
     assert config.ollama_url() == "http://localhost:11434/v1"
     assert config.telemetry_interval_seconds() == 1.0
-    assert config.api_url() == "http://127.0.0.1:8000"
     assert config.cookie_secure() is False
 
 
@@ -38,14 +40,12 @@ def test_environment_overrides_and_normalization(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setenv("MANDALA_COPILOT_MODEL", " llama3:8b ")
     monkeypatch.setenv("MANDALA_OLLAMA_URL", "http://127.0.0.1:9999/v1/")
     monkeypatch.setenv("MANDALA_TELEMETRY_INTERVAL", "2.5")
-    monkeypatch.setenv("MANDALA_API_URL", "https://mandala.example:8443/")
     monkeypatch.setenv("MANDALA_COOKIE_SECURE", "TRUE")
 
     # Then: they are read verbatim apart from trimming and trailing-slash cleanup.
     assert config.copilot_model() == "llama3:8b"
     assert config.ollama_url() == "http://127.0.0.1:9999/v1"
     assert config.telemetry_interval_seconds() == 2.5
-    assert config.api_url() == "https://mandala.example:8443"
     assert config.cookie_secure() is True
 
 
@@ -119,5 +119,6 @@ def test_example_file_documents_every_setting() -> None:
         if line.strip() and not line.strip().startswith("#")
     }
 
-    # Then: it covers exactly the settings this module reads.
-    assert documented == set(ENV_NAMES)
+    # Then: it covers the settings this module reads plus the proxy-only origin,
+    # and nothing that no code consumes.
+    assert documented == set(ENV_NAMES) | set(PROXY_ENV_NAMES)
