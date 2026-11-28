@@ -23,6 +23,7 @@ import aiosqlite
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel, Field
 
+from backend import config
 from backend.security import (
     DB_PATH,
     SESSION_COOKIE_MAX_AGE,
@@ -66,9 +67,9 @@ def _set_session_cookie(response: Response, username: str) -> str:
     """
     Issue a fresh 24h JWT and attach it as the ``mandala_session`` cookie.
 
-    ``secure=False`` is intentional: Mandala is a local-first desktop IDE served
-    over ``http://localhost``. Enable it (or set MANDALA_COOKIE_SECURE=1) once
-    the dashboard is exposed through HTTPS.
+    The ``Secure`` flag follows ``MANDALA_COOKIE_SECURE`` (default off, because
+    Mandala is a local-first desktop IDE served over ``http://localhost``). Set
+    it to 1 once the dashboard is exposed through HTTPS.
     """
     token = create_access_token({"sub": username})
     response.set_cookie(
@@ -78,7 +79,7 @@ def _set_session_cookie(response: Response, username: str) -> str:
         path=SESSION_COOKIE_PATH,
         httponly=True,
         samesite="strict",
-        secure=False,
+        secure=config.cookie_secure(),
     )
     return token
 

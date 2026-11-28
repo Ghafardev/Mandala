@@ -14,6 +14,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, ValidationError
 
+from backend import config
 from backend.runtime import (
     CompileRejected,
     CompileRunRequest,
@@ -220,7 +221,7 @@ def sample_telemetry_frame() -> Dict[str, Any]:
 
 telemetry_hub = TelemetryHub(
     sample_telemetry_frame,
-    interval_seconds=float(os.getenv("MANDALA_TELEMETRY_INTERVAL", "1.0")),
+    interval_seconds=config.telemetry_interval_seconds(),
 )
 
 

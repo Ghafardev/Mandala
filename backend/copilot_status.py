@@ -9,22 +9,23 @@ that model is present, and the resulting ``source``.
 from __future__ import annotations
 
 import json
-import os
 import urllib.request
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-DEFAULT_MODEL = "qwen3.5:b"
-DEFAULT_ENDPOINT = "http://localhost:11434/v1"
+from backend import config
+
+DEFAULT_MODEL = config.DEFAULT_COPILOT_MODEL
+DEFAULT_ENDPOINT = config.DEFAULT_OLLAMA_URL
 
 Prober = Callable[[str], Tuple[bool, List[str], Optional[str]]]
 
 
 def configured_model() -> str:
-    return os.getenv("MANDALA_COPILOT_MODEL", DEFAULT_MODEL)
+    return config.copilot_model()
 
 
 def configured_endpoint() -> str:
-    return os.getenv("MANDALA_OLLAMA_URL", DEFAULT_ENDPOINT).rstrip("/")
+    return config.ollama_url()
 
 
 def probe_models(endpoint: str, timeout: float = 1.5) -> Tuple[bool, List[str], Optional[str]]:

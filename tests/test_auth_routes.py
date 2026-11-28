@@ -101,3 +101,31 @@ def test_task_history_requires_session_and_returns_list(client: TestClient) -> N
 
     assert response.status_code == 200
     assert response.json() == []
+
+
+def test_session_cookie_is_not_secure_by_default(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Given: MANDALA_COOKIE_SECURE is unset (local http://localhost use).
+    monkeypatch.delenv("MANDALA_COOKIE_SECURE", raising=False)
+
+    # When: the administrator is created and a session cookie is issued.
+    response = client.post("/api/auth/setup", json=ADMIN)
+
+    # Then: the cookie is not marked Secure, so the browser still sends it.
+    assert response.status_code == 201
+    assert "secure" not in response.headers["set-cookie"].lower()
+
+
+def test_session_cookie_is_secure_when_configured(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Given: the deployment is served over HTTPS and opted in.
+    monkeypatch.setenv("MANDALA_COOKIE_SECURE", "1")
+
+    # When: a session cookie is issued.
+    response = client.post("/api/auth/setup", json=ADMIN)
+
+    # Then: the cookie carries the Secure flag.
+    assert response.status_code == 201
+    assert "secure" in response.headers["set-cookie"].lower()
