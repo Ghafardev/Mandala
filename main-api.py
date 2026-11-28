@@ -25,6 +25,7 @@ from backend.runtime import (
 from backend.copilot_agent import create_pydantic_ai_agent, fallback_copilot_diagnosis
 
 from backend.routers.auth import router as auth_router
+from backend.routers.models import router as models_router
 from backend.routers.task import task_router
 from backend.database import initialize_database
 from backend.telemetry import normalize_nvml_devices, normalize_rocm_smi_json
@@ -56,6 +57,7 @@ app.add_middleware(
 
 app.include_router(auth_router)
 app.include_router(task_router)
+app.include_router(models_router)
 
 # Initialize Pydantic AI agent if available
 copilot_agent = create_pydantic_ai_agent()

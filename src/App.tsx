@@ -5,7 +5,9 @@ import { TelemetryPanel } from './components/TelemetryPanel';
 import { CopilotSidebar } from './components/CopilotSidebar';
 import { Mandala3DGraphView } from './components/mandala3d/Mandala3DGraphView';
 import { EnvironmentStatusBanner } from './components/EnvironmentStatusBanner';
+import { AddModelModal } from './components/models/AddModelModal';
 import { createTelemetryWebSocket, fetchRuntimeCapability, type RuntimeCapabilityState } from './lib/api';
+import type { ModelRecord } from './lib/models';
 import type { TelemetryPayload } from './types';
 
 export default function App() {
@@ -13,6 +15,7 @@ export default function App() {
   const [isCompiling, setIsCompiling] = useState(false);
   const [isCopilotOpen, setIsCopilotOpen] = useState(true);
   const [isTelemetryOpen, setIsTelemetryOpen] = useState(true);
+  const [isAddModelOpen, setIsAddModelOpen] = useState(false);
   const [externalPrompt, setExternalPrompt] = useState<string | null>(null);
   const [runtimeCapability, setRuntimeCapability] = useState<RuntimeCapabilityState | null>(null);
   const [gpuTelemetry, setGpuTelemetry] = useState<TelemetryPayload | null>(null);
@@ -80,7 +83,18 @@ export default function App() {
         onToggleCopilot={() => setIsCopilotOpen(!isCopilotOpen)}
         isTelemetryOpen={isTelemetryOpen}
         onToggleTelemetry={() => setIsTelemetryOpen(!isTelemetryOpen)}
+        onAddModel={() => setIsAddModelOpen(true)}
         runtimeCapability={runtimeCapability}
+      />
+
+      <AddModelModal
+        opened={isAddModelOpen}
+        onClose={() => setIsAddModelOpen(false)}
+        onRegistered={(model: ModelRecord) =>
+          addLogMessage(
+            `[MODELS] Registered ${model.display_name} (${model.engine}, ${model.est_vram_gb ?? '—'} GB est., state=${model.state}).`
+          )
+        }
       />
 
       <EnvironmentStatusBanner runtimeCapability={runtimeCapability} telemetry={gpuTelemetry} />

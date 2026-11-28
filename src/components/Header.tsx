@@ -4,6 +4,7 @@ import {
     Sparkles,
     Activity,
     Play,
+    Plus,
     RotateCcw,
 } from 'lucide-react';
 import type { RuntimeCapabilityState } from '../lib/api';
@@ -18,6 +19,7 @@ interface HeaderProps {
     isTelemetryOpen?: boolean;
     onToggleTelemetry?: () => void;
     onResetNodes?: () => void;
+    onAddModel?: () => void;
     runtimeCapability?: RuntimeCapabilityState | null;
 }
 
@@ -31,6 +33,7 @@ export const Header: React.FC<HeaderProps> = ({
     isTelemetryOpen = true,
     onToggleTelemetry,
     onResetNodes,
+    onAddModel,
     runtimeCapability,
 }) => {
     const backend = runtimeCapability?.backend ?? 'cpu';
@@ -117,6 +120,17 @@ export const Header: React.FC<HeaderProps> = ({
 
       {/* Right: Actions & Panel Toggles */}
       <div className="flex items-center gap-2">
+        {onAddModel && (
+          <button
+            onClick={onAddModel}
+            title="Register a model (Hugging Face, local path, or GGUF upload)"
+            className="flex items-center gap-1.5 rounded-md border border-emerald-500/30 bg-emerald-950/30 px-2.5 py-1.5 text-xs font-medium text-emerald-300 hover:bg-emerald-900/40 transition"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            <span className="hidden sm:inline">Add Model</span>
+          </button>
+        )}
+
         {onResetNodes && (
           <button
             onClick={onResetNodes}
