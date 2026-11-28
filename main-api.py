@@ -299,7 +299,8 @@ async def compile_and_run(request_data: dict):
             payload["kernel_type"] = "gemm"
 
         request = CompileRunRequest.model_validate(payload)
-        result = execute_compile_request(request)
+        # Kernel work is CPU/GPU bound and blocking; keep it off the event loop.
+        result = await asyncio.to_thread(execute_compile_request, request)
         if isinstance(result, CompileRejected):
             raise HTTPException(status_code=409, detail=result.model_dump(mode="json"))
         if isinstance(result, Exception):

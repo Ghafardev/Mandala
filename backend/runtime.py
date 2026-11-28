@@ -273,6 +273,65 @@ def validate_target_compatibility(request: CompileRunRequest, capability: Runtim
         )
 
 
+_FLOAT32_EPSILON = 1.1920928955078125e-07
+
+# A float32 dot product of K terms accumulates rounding error near K * eps * |c|.
+# The factor below is a deliberately generous bound on that accumulation, so a
+# kernel is only reported as verified when its measured error clears a real bound.
+_FLOAT32_GEMM_ERROR_FACTOR = 8.0
+
+
+@dataclass(frozen=True, slots=True)
+class _KernelMeasurement:
+    elapsed_us: float
+    max_absolute_error: float
+    verified: bool
+
+
+def _max_absolute_error(torch_module: object, output: object, reference: object) -> float:
+    """Measure the largest elementwise difference between a kernel and its reference."""
+    return float(torch_module.max(torch_module.abs(output - reference)).item())
+
+
+def _float32_gemm_tolerance(k: int, reference_scale: float) -> float:
+    """Error bound for a float32 GEMM whose dot products are ``k`` terms long."""
+    return max(
+        _FLOAT32_EPSILON,
+        _FLOAT32_GEMM_ERROR_FACTOR * _FLOAT32_EPSILON * max(1, k) * max(1.0, reference_scale),
+    )
+
+
+def _execute_verified_gemm(
+    torch_module: object, m: int, n: int, k: int, device: object
+) -> _KernelMeasurement:
+    """Run the GEMM kernel and compare it against a float64 host reference.
+
+    The measured error is what the caller reports; a kernel that does not match
+    the reference within its float32 error bound comes back unverified.
+    """
+    a = torch_module.randn(m, k, device=device, dtype=torch_module.float32)
+    b = torch_module.randn(k, n, device=device, dtype=torch_module.float32)
+    start = time.perf_counter_ns()
+    output = a @ b
+    if hasattr(torch_module, "cuda") and torch_module.cuda.is_available():
+        torch_module.cuda.synchronize(device)
+    elapsed_us = (time.perf_counter_ns() - start) / 1000.0
+
+    # Same product accumulated in float64 on the host: an independent reference,
+    # not the kernel's own output.
+    reference = torch_module.matmul(
+        a.to("cpu", torch_module.float64), b.to("cpu", torch_module.float64)
+    ).to(device)
+    max_abs_error = _max_absolute_error(torch_module, output, reference)
+    reference_scale = float(torch_module.max(torch_module.abs(reference)).item())
+    tolerance = _float32_gemm_tolerance(k, reference_scale)
+    return _KernelMeasurement(
+        elapsed_us=elapsed_us,
+        max_absolute_error=max_abs_error,
+        verified=max_abs_error <= tolerance,
+    )
+
+
 def _execute_real_triton_vector_add(torch_module: object, n: int, device: object) -> float:
     """Run a minimal real Triton vector-add JIT kernel when the environment supports it."""
     try:
@@ -383,26 +442,20 @@ def execute_compile_request(request: CompileRunRequest) -> CompileResult:
                 kernel_type=request.kernel_type,
                 capability=capability,
                 elapsed_us=elapsed_us,
-                verified=True,
+                verified=max_abs_error <= _FLOAT32_EPSILON * 8,
                 max_absolute_error=max_abs_error,
             )
 
         if request.kernel_type is KernelType.GEMM:
-            m, n, k = int(request.M), int(request.N), int(request.K)
-            a = torch.randn(m, k, device=device, dtype=torch.float32)
-            b = torch.randn(k, n, device=device, dtype=torch.float32)
-            start = time.perf_counter_ns()
-            c = a @ b
-            if hasattr(torch, "cuda") and torch.cuda.is_available():
-                torch.cuda.synchronize(device)
-            elapsed_us = (time.perf_counter_ns() - start) / 1000.0
-            max_abs_error = 0.0
+            measurement = _execute_verified_gemm(
+                torch, int(request.M), int(request.N), int(request.K), device
+            )
             return CompileCompleted(
                 kernel_type=request.kernel_type,
                 capability=capability,
-                elapsed_us=elapsed_us,
-                verified=True,
-                max_absolute_error=max_abs_error,
+                elapsed_us=measurement.elapsed_us,
+                verified=measurement.verified,
+                max_absolute_error=measurement.max_absolute_error,
             )
 
         return CompileRejected(

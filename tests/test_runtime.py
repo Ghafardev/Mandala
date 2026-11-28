@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 import importlib
+import importlib.util
+import struct
 import sys
+import threading
+from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
@@ -204,3 +208,182 @@ def test_execute_compile_request_uses_triton_vector_add_helper(monkeypatch: pyte
 
     assert result.status == "completed"
     assert result.max_absolute_error == 0.0
+
+
+def _f32(value: float) -> float:
+    return struct.unpack("f", struct.pack("f", value))[0]
+
+
+class _FakeScalar:
+    def __init__(self, value: float) -> None:
+        self._value = value
+
+    def item(self) -> float:
+        return self._value
+
+
+class _FakeTensor:
+    """Nested-list tensor stand-in that rounds float32 matmul results like a kernel."""
+
+    def __init__(self, rows, dtype: str, device: str = "cuda", scale: float = 1.0) -> None:
+        self.rows = rows
+        self.dtype = dtype
+        self.device = device
+        self.scale = scale
+
+    def __matmul__(self, other: "_FakeTensor") -> "_FakeTensor":
+        columns = list(zip(*other.rows))
+        rows = []
+        for left in self.rows:
+            row = []
+            for right in columns:
+                total = sum(x * y for x, y in zip(left, right)) * self.scale
+                row.append(_f32(total) if self.dtype == "float32" else float(total))
+            rows.append(row)
+        return _FakeTensor(rows, self.dtype, self.device)
+
+    def __sub__(self, other: "_FakeTensor") -> "_FakeTensor":
+        return _FakeTensor(
+            [[x - y for x, y in zip(left, right)] for left, right in zip(self.rows, other.rows)],
+            "float64",
+            self.device,
+        )
+
+    def to(self, device=None, dtype=None) -> "_FakeTensor":
+        # Any host float64 copy is an independent reference, so the kernel's drift drops.
+        return _FakeTensor(self.rows, dtype or self.dtype, device or self.device)
+
+
+class _FakeCuda:
+    @staticmethod
+    def is_available() -> bool:
+        return True
+
+    @staticmethod
+    def synchronize(device: object) -> None:
+        return None
+
+
+class _FakeTorch:
+    float32 = "float32"
+    float64 = "float64"
+    cuda = _FakeCuda()
+
+    def __init__(self, float32_scale: float = 1.0) -> None:
+        self._scale = float32_scale
+
+    @staticmethod
+    def device(name: str) -> str:
+        return name
+
+    def randn(self, rows: int, columns: int, device=None, dtype=None) -> _FakeTensor:
+        values = [
+            [(((row * 7 + column * 5) % 13) - 6) / 6 for column in range(columns)]
+            for row in range(rows)
+        ]
+        return _FakeTensor(values, dtype or "float32", device or "cuda", self._scale)
+
+    @staticmethod
+    def matmul(left: _FakeTensor, right: _FakeTensor) -> _FakeTensor:
+        return left @ right
+
+    @staticmethod
+    def abs(tensor: _FakeTensor) -> _FakeTensor:
+        return _FakeTensor(
+            [[abs(value) for value in row] for row in tensor.rows], tensor.dtype, tensor.device
+        )
+
+    @staticmethod
+    def max(tensor: _FakeTensor) -> _FakeScalar:
+        return _FakeScalar(max(max(row) for row in tensor.rows))
+
+
+def _install_fake_gpu_runtime(monkeypatch: pytest.MonkeyPatch, float32_scale: float = 1.0) -> None:
+    fake_torch = _FakeTorch(float32_scale=float32_scale)
+    capability = RuntimeCapability(
+        status=RuntimeStatus.AVAILABLE,
+        backend=ComputeBackend.CUDA,
+        triton_available=True,
+        execution_environment=ExecutionEnvironment.CUDA_LOCAL,
+        device_name="Fake GPU",
+        device_arch="sm80",
+    )
+    monkeypatch.setattr("backend.runtime.detect_runtime_capability", lambda: capability)
+    monkeypatch.setattr("backend.runtime.probe_gpu_kernel_execution", lambda: (True, "ok"))
+    monkeypatch.setattr(
+        "backend.runtime.import_module", lambda name: fake_torch if name == "torch" else None
+    )
+
+
+def test_execute_compile_request_gemm_reports_measured_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Given: a GEMM kernel whose float32 result rounds away from the float64 reference.
+    _install_fake_gpu_runtime(monkeypatch)
+
+    # When: the GEMM branch runs.
+    result = execute_compile_request(CompileRunRequest(kernel_type="gemm", M=16, N=16, K=32))
+
+    # Then: the reported error is a real measurement, not the old hardcoded zero.
+    assert result.status == "completed"
+    assert result.max_absolute_error > 0.0
+    assert result.verified is True
+
+
+def test_execute_compile_request_gemm_rejects_kernel_that_misses_reference(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Given: a kernel that returns results 5% away from the reference product.
+    _install_fake_gpu_runtime(monkeypatch, float32_scale=1.05)
+
+    # When: the GEMM branch compares it against the reference.
+    result = execute_compile_request(CompileRunRequest(kernel_type="gemm", M=16, N=16, K=32))
+
+    # Then: the result is reported as unverified with the measured error.
+    assert result.status == "completed"
+    assert result.verified is False
+    assert result.max_absolute_error > 1e-2
+
+
+def _import_main_api():
+    spec = importlib.util.spec_from_file_location(
+        "mandala_main_api", Path(__file__).resolve().parents[1] / "main-api.py"
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_compile_and_run_route_runs_kernel_work_off_the_event_loop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _import_main_api()
+    threads: dict[str, int] = {}
+
+    def fake_execute(request: CompileRunRequest) -> CompileRejected:
+        threads["kernel"] = threading.get_ident()
+        capability = RuntimeCapability(
+            status=RuntimeStatus.UNAVAILABLE,
+            backend=ComputeBackend.CPU,
+            triton_available=False,
+            diagnostic="stubbed",
+        )
+        return CompileRejected(reason="stubbed", capability=capability)
+
+    monkeypatch.setattr(module, "execute_compile_request", fake_execute)
+
+    async def call_route() -> None:
+        import asyncio
+
+        from fastapi import HTTPException
+
+        threads["loop"] = threading.get_ident()
+        with pytest.raises(HTTPException):
+            await module.compile_and_run({"kernel_type": "gemm", "M": 4, "N": 4, "K": 4})
+
+    import asyncio
+
+    asyncio.run(call_route())
+
+    assert threads["kernel"] != threads["loop"]
