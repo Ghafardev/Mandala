@@ -14,9 +14,6 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from backend import config
 
-DEFAULT_MODEL = config.DEFAULT_COPILOT_MODEL
-DEFAULT_ENDPOINT = config.DEFAULT_OLLAMA_URL
-
 Prober = Callable[[str], Tuple[bool, List[str], Optional[str]]]
 
 

@@ -297,7 +297,7 @@ def _float32_gemm_tolerance(k: int, reference_scale: float) -> float:
     """Error bound for a float32 GEMM whose dot products are ``k`` terms long."""
     return max(
         _FLOAT32_EPSILON,
-        _FLOAT32_GEMM_ERROR_FACTOR * _FLOAT32_EPSILON * max(1, k) * max(1.0, reference_scale),
+        _FLOAT32_GEMM_ERROR_FACTOR * _FLOAT32_EPSILON * k * max(1.0, reference_scale),
     )
 
 
@@ -313,16 +313,16 @@ def _execute_verified_gemm(
     b = torch_module.randn(k, n, device=device, dtype=torch_module.float32)
     start = time.perf_counter_ns()
     output = a @ b
-    if hasattr(torch_module, "cuda") and torch_module.cuda.is_available():
-        torch_module.cuda.synchronize(device)
+    torch_module.cuda.synchronize(device)
     elapsed_us = (time.perf_counter_ns() - start) / 1000.0
 
     # Same product accumulated in float64 on the host: an independent reference,
-    # not the kernel's own output.
+    # not the kernel's own output. The comparison happens on the host too, so no
+    # float64 product is ever materialized on the GPU.
     reference = torch_module.matmul(
         a.to("cpu", torch_module.float64), b.to("cpu", torch_module.float64)
-    ).to(device)
-    max_abs_error = _max_absolute_error(torch_module, output, reference)
+    )
+    max_abs_error = _max_absolute_error(torch_module, output.to("cpu"), reference)
     reference_scale = float(torch_module.max(torch_module.abs(reference)).item())
     tolerance = _float32_gemm_tolerance(k, reference_scale)
     return _KernelMeasurement(
@@ -362,9 +362,7 @@ def _execute_real_triton_vector_add(torch_module: object, n: int, device: object
     if hasattr(torch_module, "cuda") and torch_module.cuda.is_available():
         torch_module.cuda.synchronize(device)
 
-    reference = x + y
-    max_abs_error = float(torch_module.max(torch_module.abs(output - reference)).item())
-    return max_abs_error
+    return _max_absolute_error(torch_module, output, x + y)
 
 
 def probe_gpu_kernel_execution() -> tuple[bool, str]:

@@ -14,16 +14,13 @@ import os
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-ENV_FILE_NAME = ".env"
 
 DEFAULT_COPILOT_MODEL = "qwen3.5:b"
 DEFAULT_OLLAMA_URL = "http://localhost:11434/v1"
 DEFAULT_TELEMETRY_INTERVAL_SECONDS = 1.0
 MIN_TELEMETRY_INTERVAL_SECONDS = 0.05
-DEFAULT_COOKIE_SECURE = False
 
 _TRUE_VALUES = frozenset({"1", "true", "yes", "on"})
-_FALSE_VALUES = frozenset({"0", "false", "no", "off"})
 
 
 def _raw(name: str, default: str) -> str:
@@ -37,7 +34,7 @@ def load_env_file(path: Path | str | None = None) -> Path | None:
     Stdlib-only on purpose: the backend reads the file documented in
     ``.env.example`` without pulling in another dependency.
     """
-    env_path = Path(path or os.getenv("MANDALA_ENV_FILE") or PROJECT_ROOT / ENV_FILE_NAME)
+    env_path = Path(path or os.getenv("MANDALA_ENV_FILE") or PROJECT_ROOT / ".env")
     if not env_path.is_file():
         return None
 
@@ -75,13 +72,12 @@ def telemetry_interval_seconds() -> float:
 
 
 def cookie_secure() -> bool:
-    """Whether the session cookie carries the ``Secure`` flag (HTTPS deployments)."""
-    raw = _raw("MANDALA_COOKIE_SECURE", "1" if DEFAULT_COOKIE_SECURE else "0").lower()
-    if raw in _TRUE_VALUES:
-        return True
-    if raw in _FALSE_VALUES:
-        return False
-    return DEFAULT_COOKIE_SECURE
+    """Whether the session cookie carries the ``Secure`` flag (HTTPS deployments).
+
+    Only an explicit truthy value opts in: a typo or an empty value must never turn
+    the flag on and lock people out of the UI.
+    """
+    return _raw("MANDALA_COOKIE_SECURE", "0").lower() in _TRUE_VALUES
 
 
 load_env_file()
