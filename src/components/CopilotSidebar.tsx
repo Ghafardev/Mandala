@@ -14,13 +14,22 @@ import {
   Cpu,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
-import { fetchWithBackendFallback } from '../lib/api';
+import {
+  copilotStatusLabel,
+  DEFAULT_BACKEND,
+  fetchWithBackendFallback,
+  type CopilotStatus,
+  type RuntimeCapabilityState,
+} from '../lib/api';
 
 export interface CopilotSidebarProps {
   isOpen: boolean;
   onClose: () => void;
   externalPrompt?: string | null;
   onClearExternalPrompt?: () => void;
+  /** Runtime reported by /api/v1/copilot/status; never assume the local model. */
+  copilotStatus?: CopilotStatus | null;
+  runtimeCapability?: RuntimeCapabilityState | null;
 }
 
 interface Message {
@@ -69,8 +78,31 @@ function formatDiagnosis(payload: any): string {
     );
   }
 
-  sections.push(`_source: ${payload?.source || 'mandala-copilot'}_`);
+  const sourceLabels: Record<string, string> = {
+    pydantic_ai_ollama: 'local model',
+    pydantic_ai_rule_engine: 'deterministic rule engine (no LLM)',
+  };
+  sections.push(
+    `_source: ${sourceLabels[payload?.source] ?? payload?.source ?? 'mandala-copilot'}_`
+  );
   return sections.join('\n\n');
+}
+
+const CAPABILITIES = `I can assist you with:
+- **Triton Block Size Tuning**: candidate \`BLOCK_SIZE\` values (64, 128, 256, 512) for AMD Wave64
+- **AMD MFMA Matrix Cores**: how Triton lowers dot products on gfx942
+- **LDS Bank Conflicts**: avoiding 32-bank collisions in Local Data Share
+- **PyTorch Buffer Integration**: interfacing zero-copy device tensors`;
+
+/** The greeting states which runtime will actually answer. */
+function greetingFor(status: CopilotStatus | null | undefined): string {
+  if (!status) {
+    return '### Mandala AI Copilot\nChecking which runtime will answer…';
+  }
+  if (status.source === 'pydantic_ai_ollama') {
+    return `### Mandala AI Copilot Online\nServed by **${status.model}** via \`${status.endpoint}\`.\n\n${CAPABILITIES}`;
+  }
+  return `### Mandala AI Copilot (rule engine)\nNo local model is answering, so replies come from the deterministic rule engine.\n\n${status.detail}\n\n${CAPABILITIES}`;
 }
 
 export const CopilotSidebar: React.FC<CopilotSidebarProps> = ({
@@ -78,13 +110,22 @@ export const CopilotSidebar: React.FC<CopilotSidebarProps> = ({
   onClose,
   externalPrompt,
   onClearExternalPrompt,
+  copilotStatus = null,
+  runtimeCapability = null,
 }) => {
+  const copilotLabel = copilotStatusLabel(copilotStatus);
+  const copilotLive = copilotStatus?.source === 'pydantic_ai_ollama';
+  const deviceLabel =
+    runtimeCapability?.status === 'available' && runtimeCapability.device_arch
+      ? `${runtimeCapability.device_arch} (${runtimeCapability.backend.toUpperCase()})`
+      : 'No GPU runtime verified';
+
   const [messages, setMessages] = useState<Message[]>([
     {
       id: 'msg-init',
       role: 'assistant',
       content: `### Mandala AI Copilot Online
-Powered by **Qwen 3.5 (Local)** on AMD CDNA 3 ROCm 6.2.
+Copilot runtime not verified yet.
 
 I can assist you with:
 - **Triton Block Size Tuning**: Optimal \`BLOCK_SIZE\` (64, 128, 256, 512) for AMD Wave64
@@ -92,7 +133,7 @@ I can assist you with:
 - **LDS Bank Conflicts**: Preventing 32-bank collisions in Local Data Share
 - **PyTorch Buffer Integration**: Interfacing zero-copy hip:0 tensors`,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      model: 'Qwen 3.5 (Local)',
+      model: copilotLabel,
     },
   ]);
 
@@ -104,6 +145,22 @@ I can assist you with:
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isLoading]);
+
+  // Replace the unverified greeting once the backend reports its runtime.
+  useEffect(() => {
+    if (!copilotStatus) return;
+    setMessages((prev) =>
+      prev.length === 1 && prev[0].id === 'msg-init'
+        ? [
+            {
+              ...prev[0],
+              content: greetingFor(copilotStatus),
+              model: copilotStatusLabel(copilotStatus),
+            },
+          ]
+        : prev
+    );
+  }, [copilotStatus]);
 
   useEffect(() => {
     if (externalPrompt) {
@@ -151,7 +208,7 @@ I can assist you with:
         role: 'assistant',
         content: replyContent,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        model: 'Qwen 3.5 (Local)',
+        model: copilotLabel,
       };
 
       setMessages((prev) => [...prev, botMsg]);
@@ -163,7 +220,7 @@ I can assist you with:
           role: 'assistant',
           content: `Unable to reach the Mandala Copilot API (http://localhost:8000/api/v1/copilot/chat): ${err.message}. Ensure main-api.py is running.`,
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          model: 'Qwen 3.5 (Local)',
+          model: copilotLabel,
         },
       ]);
     } finally {
@@ -197,9 +254,16 @@ I can assist you with:
             <h2 className="text-xs font-bold tracking-wider text-zinc-100 uppercase">
               Mandala Copilot
             </h2>
-            <div className="flex items-center gap-1.5 text-[10px] text-zinc-400 font-mono">
-              <span className="h-1.5 w-1.5 rounded-full bg-cyan-400"></span>
-              <span className="text-cyan-300">Qwen 3.5 (Local)</span>
+            <div
+              className="flex items-center gap-1.5 text-[10px] text-zinc-400 font-mono"
+              title={copilotStatus?.detail ?? 'Waiting for /api/v1/copilot/status'}
+            >
+              <span
+                className={`h-1.5 w-1.5 rounded-full ${copilotLive ? 'bg-cyan-400' : 'bg-amber-400'}`}
+              ></span>
+              <span className={copilotLive ? 'text-cyan-300' : 'text-amber-300'}>
+                {copilotLabel}
+              </span>
             </div>
           </div>
         </div>
@@ -213,7 +277,7 @@ I can assist you with:
                   role: 'assistant',
                   content: 'Chat cleared. How can I assist with your ROCm kernel optimization?',
                   timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-                  model: 'Qwen 3.5 (Local)',
+                  model: copilotLabel,
                 },
               ])
             }
@@ -236,9 +300,11 @@ I can assist you with:
       <div className="flex items-center justify-between border-b border-zinc-900 bg-zinc-900/40 px-4 py-2 text-[11px] font-mono text-zinc-400">
         <span className="flex items-center gap-1">
           <Cpu className="h-3 w-3 text-cyan-400" />
-          API: http://localhost:8000
+          API: {DEFAULT_BACKEND}
         </span>
-        <span className="text-emerald-400">gfx942 (CDNA 3)</span>
+        <span className={runtimeCapability?.status === 'available' ? 'text-emerald-400' : 'text-amber-400'}>
+          {deviceLabel}
+        </span>
       </div>
 
       {/* Messages List */}
@@ -260,7 +326,7 @@ I can assist you with:
               ) : (
                 <>
                   <Sparkles className="h-3 w-3 text-cyan-400" />
-                  <span className="text-zinc-300 font-semibold">Qwen 3.5</span>
+                  <span className="text-zinc-300 font-semibold">{m.model || copilotLabel}</span>
                   <span>•</span>
                   <span>{m.timestamp}</span>
                 </>
@@ -309,7 +375,7 @@ I can assist you with:
           <div className="flex flex-col space-y-1.5 items-start">
             <div className="flex items-center gap-1.5 text-[10px] text-zinc-400 font-mono px-1">
               <Sparkles className="h-3 w-3 text-cyan-400 animate-spin" />
-              <span>Qwen 3.5 Thinking...</span>
+              <span>{copilotLabel} thinking...</span>
             </div>
             <div className="rounded-xl bg-zinc-900 border border-zinc-800 px-4 py-3 text-zinc-400 flex items-center gap-2">
               <span className="h-2 w-2 rounded-full bg-cyan-400 animate-pulse"></span>
@@ -354,7 +420,7 @@ I can assist you with:
             type="text"
             value={inputMessage}
             onChange={(e) => setInputMessage(e.target.value)}
-            placeholder="Ask Qwen 3.5 about ROCm / Triton..."
+            placeholder="Ask Copilot about ROCm / Triton..."
             disabled={isLoading}
             className="w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3.5 py-2.5 pr-10 text-xs text-zinc-100 placeholder-zinc-500 focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500/50"
           />

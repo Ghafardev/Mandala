@@ -386,7 +386,7 @@ export const TelemetryPanel: React.FC<TelemetryPanelProps> = ({
             >
               {logs.length === 0 ? (
                 <div className="py-8 text-center text-zinc-400 font-mono text-xs">
-                  Awaiting kernel dispatch... Ready on AMD CDNA 3.
+                  Awaiting kernel dispatch... no device claim until telemetry arrives.
                 </div>
               ) : (
                 logs.map((log, idx) => {

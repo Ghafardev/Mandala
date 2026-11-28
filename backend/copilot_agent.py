@@ -7,6 +7,8 @@ with structured tool outputs for kernel diagnostics, block/grid tuning, and MFMA
 from typing import Dict, Any, Optional
 from pydantic import BaseModel, Field
 
+from backend.copilot_status import configured_endpoint, configured_model
+
 try:
     from pydantic_ai import Agent, RunContext
     from pydantic_ai.models.openai import OpenAIChatModel
@@ -48,10 +50,10 @@ def create_pydantic_ai_agent():
         return None
 
     agent = Agent(
-        # Local Ollama instance hosting qwen3.5:b
+        # Local Ollama instance; MANDALA_COPILOT_MODEL / MANDALA_OLLAMA_URL override.
         OpenAIChatModel(
-            "qwen3.5:b",
-            provider=OpenAIProvider(base_url="http://localhost:11434/v1", api_key="ollama"),
+            configured_model(),
+            provider=OpenAIProvider(base_url=configured_endpoint(), api_key="ollama"),
         ),
         output_type=KernelOptimizationResult,
         system_prompt=SYSTEM_PROMPT,

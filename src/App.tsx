@@ -6,7 +6,14 @@ import { CopilotSidebar } from './components/CopilotSidebar';
 import { Mandala3DGraphView } from './components/mandala3d/Mandala3DGraphView';
 import { EnvironmentStatusBanner } from './components/EnvironmentStatusBanner';
 import { AddModelModal } from './components/models/AddModelModal';
-import { createTelemetryWebSocket, fetchRuntimeCapability, type RuntimeCapabilityState } from './lib/api';
+import {
+  copilotStatusLabel,
+  createTelemetryWebSocket,
+  fetchCopilotStatus,
+  fetchRuntimeCapability,
+  type CopilotStatus,
+  type RuntimeCapabilityState,
+} from './lib/api';
 import type { ModelRecord } from './lib/models';
 import type { TelemetryPayload } from './types';
 
@@ -18,6 +25,7 @@ export default function App() {
   const [isAddModelOpen, setIsAddModelOpen] = useState(false);
   const [externalPrompt, setExternalPrompt] = useState<string | null>(null);
   const [runtimeCapability, setRuntimeCapability] = useState<RuntimeCapabilityState | null>(null);
+  const [copilotStatus, setCopilotStatus] = useState<CopilotStatus | null>(null);
   const [gpuTelemetry, setGpuTelemetry] = useState<TelemetryPayload | null>(null);
   const [telemetryStatus, setTelemetryStatus] = useState<
     'connected' | 'connecting' | 'disconnected'
@@ -28,7 +36,7 @@ export default function App() {
     `[SYS-INIT] Mandala Low-Code ROCm Studio booting.`,
     `[DEVICE] Waiting for runtime capability check from the backend API.`,
     `[TRITON] Execution gates will remain closed until the environment is verified.`,
-    `[LLM] Mandala AI Copilot loaded: Qwen 3.5 (Local).`,
+    `[LLM] Probing the Copilot runtime (model reachability is not assumed).`,
     `[3D-MANDALA] Sacred Geometry Graph Engine initialized.`,
   ]);
 
@@ -63,6 +71,27 @@ export default function App() {
   }, [addLogMessage]);
 
   useEffect(() => {
+    let active = true;
+    fetchCopilotStatus().then((status) => {
+      if (!active) return;
+      setCopilotStatus(status);
+      if (!status) {
+        addLogMessage('[LLM] Copilot status unavailable: the backend did not answer.');
+        return;
+      }
+      const label = copilotStatusLabel(status);
+      addLogMessage(
+        status.source === 'pydantic_ai_ollama'
+          ? `[LLM] Copilot ready: ${label} — ${status.detail}`
+          : `[LLM] Copilot in ${label} mode — ${status.detail}`
+      );
+    });
+    return () => {
+      active = false;
+    };
+  }, [addLogMessage]);
+
+  useEffect(() => {
     const cleanup = createTelemetryWebSocket(
       (data) => setGpuTelemetry(data),
       (status, url) => {
@@ -85,6 +114,7 @@ export default function App() {
         onToggleTelemetry={() => setIsTelemetryOpen(!isTelemetryOpen)}
         onAddModel={() => setIsAddModelOpen(true)}
         runtimeCapability={runtimeCapability}
+        copilotStatus={copilotStatus}
       />
 
       <AddModelModal
@@ -141,6 +171,8 @@ export default function App() {
           onClose={() => setIsCopilotOpen(false)}
           externalPrompt={externalPrompt}
           onClearExternalPrompt={() => setExternalPrompt(null)}
+          copilotStatus={copilotStatus}
+          runtimeCapability={runtimeCapability}
         />
       </div>
     </div>

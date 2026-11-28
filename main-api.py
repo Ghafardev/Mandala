@@ -23,6 +23,8 @@ from backend.runtime import (
     execute_compile_request,
 )
 from backend.copilot_agent import create_pydantic_ai_agent, fallback_copilot_diagnosis
+from backend.copilot_status import detect_copilot_runtime
+from backend.telemetry_hub import TelemetryHub
 
 from backend.routers.auth import router as auth_router
 from backend.routers.models import router as models_router
@@ -33,9 +35,13 @@ from backend.telemetry import normalize_nvml_devices, normalize_rocm_smi_json
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    """Create the local SQLite schema before serving the first request."""
+    """Create the SQLite schema and start the single telemetry sampler."""
     await asyncio.to_thread(initialize_database)
-    yield
+    await telemetry_hub.start()
+    try:
+        yield
+    finally:
+        await telemetry_hub.stop()
 
 
 app = FastAPI(
@@ -207,6 +213,17 @@ def get_gpu_telemetry_universal() -> Dict[str, Any]:
         },
     }
 
+def sample_telemetry_frame() -> Dict[str, Any]:
+    """Blocking hardware read, executed by the hub in a worker thread."""
+    return {**get_gpu_telemetry_universal(), "cpu": get_cpu_telemetry()}
+
+
+telemetry_hub = TelemetryHub(
+    sample_telemetry_frame,
+    interval_seconds=float(os.getenv("MANDALA_TELEMETRY_INTERVAL", "1.0")),
+)
+
+
 def detect_compute_backend() -> str:
     capability = detect_runtime_capability()
     return capability.backend.value
@@ -215,7 +232,11 @@ def detect_compute_backend() -> str:
 @app.get("/api/v1/health")
 async def health_check():
     capability = detect_runtime_capability()
-    telemetry = get_gpu_telemetry_universal()
+    # Reuse the shared sampler frame instead of running rocm-smi on the request path.
+    frame = telemetry_hub.latest
+    if frame is None:
+        frame = await telemetry_hub.sample_once()
+    telemetry = frame.payload
     execution_environment = (
         capability.execution_environment.value
         if capability.execution_environment is not None
@@ -232,21 +253,20 @@ async def health_check():
         "runtime_capability": capability.model_dump(mode="json"),
         "telemetry_backend": telemetry.get("backend"),
         "gpu_vendor": telemetry.get("vendor", "unknown"),
+        "telemetry_sampled_at": frame.sampled_at,
+        "telemetry_sampler": telemetry_hub.status(),
         "diagnostic": capability.diagnostic,
     }
 
 
 @app.websocket("/ws/gpu-telemetry")
 async def websocket_gpu_telemetry(websocket: WebSocket):
-    """Streams real-time CPU status plus GPU VRAM, usage, temperature, and power."""
+    """Fans out the single shared sample: one hardware read for every client."""
     await websocket.accept()
+    queue = telemetry_hub.subscribe()
     try:
         while True:
-            # CPU telemetry rides along with the GPU payload (which may be "none")
-            await websocket.send_json(
-                {**get_gpu_telemetry_universal(), "cpu": get_cpu_telemetry()}
-            )
-            await asyncio.sleep(1.0)
+            await websocket.send_json(await queue.get())
 
     except WebSocketDisconnect:
         pass
@@ -254,16 +274,8 @@ async def websocket_gpu_telemetry(websocket: WebSocket):
     except Exception as error:
         print(f"WebSocket telemetry error: {error}")
 
-        try:
-            await websocket.send_json(
-                {
-                    "backend": "unknown",
-                    "status": "error",
-                    "message": str(error),
-                }
-            )
-        except Exception:
-            pass
+    finally:
+        telemetry_hub.unsubscribe(queue)
 
 @app.post("/api/v1/triton/compile-and-run")
 async def compile_and_run(request_data: dict):
@@ -323,6 +335,14 @@ def build_copilot_prompt(
 
     sections.append(f"user: {message}")
     return "\n\n".join(sections)
+
+
+@app.get("/api/v1/copilot/status")
+async def copilot_status():
+    """Report which runtime would answer, instead of assuming the local model."""
+    return await asyncio.to_thread(
+        detect_copilot_runtime, agent_configured=copilot_agent is not None
+    )
 
 
 @app.post("/api/v1/copilot/chat")

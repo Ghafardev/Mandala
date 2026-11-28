@@ -7,7 +7,7 @@ import {
     Plus,
     RotateCcw,
 } from 'lucide-react';
-import type { RuntimeCapabilityState } from '../lib/api';
+import { copilotStatusLabel, type CopilotStatus, type RuntimeCapabilityState } from '../lib/api';
 
 interface HeaderProps {
     activeView?: 'workflow' | '3d-mandala';
@@ -21,6 +21,7 @@ interface HeaderProps {
     onResetNodes?: () => void;
     onAddModel?: () => void;
     runtimeCapability?: RuntimeCapabilityState | null;
+    copilotStatus?: CopilotStatus | null;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -35,6 +36,7 @@ export const Header: React.FC<HeaderProps> = ({
     onResetNodes,
     onAddModel,
     runtimeCapability,
+    copilotStatus,
 }) => {
     const backend = runtimeCapability?.backend ?? 'cpu';
     const statusLabel =
@@ -47,6 +49,11 @@ export const Header: React.FC<HeaderProps> = ({
             : backend === 'cpu'
                 ? 'CPU-Only Mode'
                 : 'GPU Unavailable';
+
+    const copilotLabel = copilotStatusLabel(copilotStatus);
+    const copilotLive = copilotStatus?.source === 'pydantic_ai_ollama';
+    const copilotTitle =
+        copilotStatus?.detail ?? 'Waiting for /api/v1/copilot/status';
 
     const statusColor =
         runtimeCapability?.status === 'available'
@@ -76,11 +83,16 @@ export const Header: React.FC<HeaderProps> = ({
             <span>[{statusLabel}]</span>
           </div>
 
-          {/* Model Indicator Required: Qwen 3.5 (Local) */}
-          <div className="hidden lg:flex items-center gap-1.5 rounded-full border border-zinc-700/60 bg-zinc-900/80 px-2.5 py-0.5 text-[11px] font-mono text-zinc-300">
-            <Sparkles className="h-3 w-3 text-cyan-400" />
+          {/* Model indicator reflects the runtime that actually answers. */}
+          <div
+            className="hidden lg:flex items-center gap-1.5 rounded-full border border-zinc-700/60 bg-zinc-900/80 px-2.5 py-0.5 text-[11px] font-mono text-zinc-300"
+            title={copilotTitle}
+          >
+            <Sparkles className={`h-3 w-3 ${copilotLive ? 'text-cyan-400' : 'text-amber-400'}`} />
             <span className="text-zinc-400">LLM:</span>
-            <span className="text-cyan-300 font-semibold">Qwen 3.5 (Local)</span>
+            <span className={`font-semibold ${copilotLive ? 'text-cyan-300' : 'text-amber-300'}`}>
+              {copilotLabel}
+            </span>
           </div>
         </div>
       </div>

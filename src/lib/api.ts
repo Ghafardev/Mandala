@@ -39,6 +39,33 @@ export async function fetchRuntimeCapability(): Promise<RuntimeCapabilityState |
   }
 }
 
+export interface CopilotStatus {
+  agent_configured: boolean;
+  model: string;
+  endpoint: string;
+  reachable: boolean;
+  model_available: boolean | null;
+  source: 'pydantic_ai_ollama' | 'pydantic_ai_rule_engine';
+  detail: string;
+}
+
+/** Human label for the runtime that actually answers Copilot requests. */
+export function copilotStatusLabel(status: CopilotStatus | null | undefined): string {
+  if (!status) return 'Checking runtime…';
+  if (status.source === 'pydantic_ai_ollama') return `${status.model} (Local)`;
+  return 'Rule engine (no LLM)';
+}
+
+export async function fetchCopilotStatus(): Promise<CopilotStatus | null> {
+  try {
+    const response = await fetchWithBackendFallback('/api/v1/copilot/status');
+    if (!response.ok) return null;
+    return (await response.json()) as CopilotStatus;
+  } catch {
+    return null;
+  }
+}
+
 export function canAttemptKernelExecution(
   capability: RuntimeCapabilityState | null | undefined,
   targetArch?: string
